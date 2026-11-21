@@ -15,7 +15,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
   {
     title: "Account",
     links: [
-      ["My orders", "/dashboard/orders"],
+      ["My purchases", "/dashboard/buying"],
       ["Sell on Lumenbay", "/dashboard/selling"],
       ["Wallet", "/dashboard/wallet"],
       ["Help", "/help"],

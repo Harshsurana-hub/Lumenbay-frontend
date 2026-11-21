@@ -20,11 +20,12 @@ import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import ThemeToggle from "./ThemeToggle";
 import NavWalletButton from "@/components/wallet/NavWalletButton";
+import ModeSwitch from "./ModeSwitch";
 import { isStandalonePage } from "@/lib/standalonePages";
 
 const ACCOUNT_LINKS = [
-  { href: "/dashboard/orders", label: "My Orders", icon: Package },
-  { href: "/dashboard/selling", label: "My Listings", icon: LayoutList },
+  { href: "/dashboard/buying", label: "My Purchases", icon: Package },
+  { href: "/dashboard/selling", label: "Seller Hub", icon: LayoutList },
   { href: "/dashboard/selling/new", label: "List an Item", icon: Plus },
   { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
   { href: "/profile", label: "Profile", icon: UserRound },
@@ -201,7 +202,7 @@ export default function Navbar() {
           <Plus className="h-4 w-4" aria-hidden="true" />
         </Link>
 
-        {/* mode switch slot */}
+        {user && <ModeSwitch className="hidden lg:flex" />}
         {user && <NavWalletButton />}
 
         <ThemeToggle />
