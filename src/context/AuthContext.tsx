@@ -158,6 +158,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    // A full load drops every bit of in-memory state (wallet, balances,
+    // dashboard data) so nothing from this user lingers on screen.
+    window.location.assign("/");
   }, [supabase]);
 
   const value = useMemo<AuthContextType>(

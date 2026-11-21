@@ -15,6 +15,7 @@ import {
   Package,
 } from "lucide-react";
 import type { Product } from "@/lib/products";
+import BuyWithEscrowDialog from "@/components/escrow/BuyWithEscrowDialog";
 
 export default function ProductDetailView({
   product,
@@ -29,6 +30,7 @@ export default function ProductDetailView({
 }) {
   const [activeImg, setActiveImg] = useState(0);
   const [wishlisted, setWishlisted] = useState(false);
+  const [buying, setBuying] = useState(false);
 
   const discountSaving = product.originalUsdPrice - product.usdPrice;
 
@@ -220,17 +222,16 @@ export default function ProductDetailView({
             <div className="flex flex-col gap-2.5">
               <button
                 type="button"
-                disabled
-                className="w-full cursor-not-allowed rounded-xl bg-surface-3 py-3.5 text-sm font-bold text-ink-faint flex items-center justify-center gap-2"
+                onClick={() => setBuying(true)}
+                className="w-full rounded-xl bg-linear-to-r from-[#E0483B] to-[#FF7A59] py-3.5 text-sm font-bold text-white shadow-lg shadow-red-500/25 transition hover:brightness-110 flex items-center justify-center gap-2"
               >
                 <Shield className="w-4 h-4" />
                 Buy with escrow
               </button>
 
               <p className="text-center text-xs leading-relaxed text-ink-muted">
-                Not live yet. Buying means funding a Stellar contract that holds your money until
-                you confirm the item arrived — neither we nor the seller can touch it in the
-                meantime. Save it for now, or message the seller below.
+                Your XLM goes into a Stellar smart contract, not to the seller and not to us, and is
+                only released when you confirm the item arrived.
               </p>
             </div>
 
@@ -317,6 +318,8 @@ export default function ProductDetailView({
         {/* ── Related products strip ── */}
         <RelatedProducts category={product.category} related={related} />
       </div>
+
+      {buying && <BuyWithEscrowDialog product={product} onClose={() => setBuying(false)} />}
     </div>
   );
 }

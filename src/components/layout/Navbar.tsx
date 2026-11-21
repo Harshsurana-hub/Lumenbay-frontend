@@ -7,6 +7,7 @@ import { Heart, User, Store } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import ThemeToggle from "./ThemeToggle";
+import NavWalletButton from "@/components/wallet/NavWalletButton";
 import { isStandalonePage } from "@/lib/standalonePages";
 
 export default function Navbar() {
@@ -133,6 +134,8 @@ export default function Navbar() {
           <span className="sm:hidden">Sell</span>
         </Link>
 
+        {user && <NavWalletButton />}
+
         <ThemeToggle />
 
         <Link
@@ -157,8 +160,11 @@ export default function Navbar() {
               className="flex items-center gap-1.5 p-1.5 rounded-md hover:bg-surface-2 transition-colors"
             >
               <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-on-accent text-xs font-bold">
-                {user.email.charAt(0).toUpperCase()}
+                {(user.displayName || user.email).charAt(0).toUpperCase()}
               </div>
+              <span className="hidden max-w-[9rem] truncate text-xs font-semibold text-ink lg:inline">
+                {user.displayName || user.email.split("@")[0]}
+              </span>
             </button>
             {accountOpen && (
               <div
@@ -170,8 +176,9 @@ export default function Navbar() {
                 className="absolute right-0 top-10 w-48 bg-surface border border-line rounded-xl shadow-lg py-1 z-50"
               >
                 <div className="px-3 py-2 border-b border-line">
-                  <p className="text-xs font-semibold text-ink truncate">{user.email}</p>
-                  <p className="text-[10px] text-ink-faint capitalize">{user.role.toLowerCase()}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-ink-faint">Signed in as</p>
+                  {user.displayName && <p className="text-sm font-bold text-ink truncate">{user.displayName}</p>}
+                  <p className="text-xs text-ink-muted truncate">{user.email}</p>
                 </div>
                 <Link href="/dashboard/orders" role="menuitem" tabIndex={-1} onClick={() => setAccountOpen(false)} className="block px-3 py-2 text-sm text-ink-muted hover:bg-surface-2 focus:bg-surface-2 focus:outline-none">My Orders</Link>
                 <Link href="/dashboard/selling" role="menuitem" tabIndex={-1} onClick={() => setAccountOpen(false)} className="block px-3 py-2 text-sm text-ink-muted hover:bg-surface-2 focus:bg-surface-2 focus:outline-none">My Listings</Link>

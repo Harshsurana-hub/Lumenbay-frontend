@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { AuthProvider } from "@/context/AuthContext";
+import { WalletProvider } from "@/context/WalletContext";
 import { ToastProvider } from "@/context/ToastContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { FeatureFlagProvider } from "@/context/FeatureFlagContext";
@@ -16,6 +17,7 @@ export default function AppProviders({ children }: { children: React.ReactNode }
     <QueryClientProvider client={queryClient}>
       <FeatureFlagProvider>
         <AuthProvider>
+          <WalletProvider>
           <ToastProvider>
             <ActivityFeedProvider>
               <PushNotificationProvider>
@@ -25,6 +27,7 @@ export default function AppProviders({ children }: { children: React.ReactNode }
               </PushNotificationProvider>
             </ActivityFeedProvider>
           </ToastProvider>
+          </WalletProvider>
         </AuthProvider>
       </FeatureFlagProvider>
     </QueryClientProvider>
