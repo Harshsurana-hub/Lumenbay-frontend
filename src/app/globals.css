@@ -422,6 +422,106 @@ body {
   50% { transform: translateY(-8px); }
 }
 
+/* ── Shop ─────────────────────────────────────────────────────────
+   The marketplace side borrows the landing page's night-and-peach
+   language, but has to work on a light ground too. Anything that must
+   stay dark in both themes (the hero vault, the escrow band) uses the
+   `lb-vault` surface; everything else follows the tokens. */
+
+/* A fixed dark surface with the landing page's ember glow. Its text uses
+   fixed light values, because ink tokens would invert on it. */
+.lb-vault {
+  background:
+    radial-gradient(120% 90% at 85% 0%, rgba(224, 72, 59, 0.38) 0%, transparent 55%),
+    radial-gradient(80% 70% at 0% 100%, rgba(255, 122, 89, 0.18) 0%, transparent 60%),
+    linear-gradient(180deg, #120B0A 0%, #070606 100%);
+  color: #fff;
+  color-scheme: dark;
+}
+
+/* Fine dot lattice, used as texture over vault surfaces and placeholders */
+.lb-dots {
+  background-image: radial-gradient(currentColor 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* Film grain: keeps large gradients from banding and gives them a tactile,
+   printed quality rather than a flat digital one. */
+.lb-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.09;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Hairline that glows across the top edge of a vault panel */
+.lb-edge-glow {
+  background: linear-gradient(90deg, transparent, rgba(255, 180, 162, 0.7), transparent);
+}
+
+/* Gradient text in the brand ramp */
+.lb-ember-text {
+  background: linear-gradient(100deg, #FFD8CC 0%, #FFB4A2 30%, #FF7A59 65%, #E0483B 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Skeleton shimmer: a soft band sweeping across the placeholder */
+.lb-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.lb-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-3) 80%, transparent), transparent);
+  animation: lb-skeleton 1.6s ease-in-out infinite;
+}
+@keyframes lb-skeleton {
+  to { transform: translateX(100%); }
+}
+
+/* Horizontal rails: scroll without a visible bar, fade at the edges */
+.lb-rail {
+  scrollbar-width: none;
+  scroll-snap-type: x mandatory;
+}
+.lb-rail::-webkit-scrollbar { display: none; }
+.lb-rail > * { scroll-snap-align: start; }
+.lb-fade-x {
+  mask-image: linear-gradient(90deg, transparent, black 16px, black calc(100% - 32px), transparent);
+}
+
+/* The escrow rail: a dashed line whose dashes travel toward the seller */
+.lb-flow-line {
+  background-image: linear-gradient(90deg, currentColor 50%, transparent 50%);
+  background-size: 12px 1px;
+  background-repeat: repeat-x;
+  animation: lb-flow 1.2s linear infinite;
+}
+.lb-flow-line-y {
+  background-image: linear-gradient(180deg, currentColor 50%, transparent 50%);
+  background-size: 1px 10px;
+  background-repeat: repeat-y;
+  animation: lb-flow-y 1.2s linear infinite;
+}
+@keyframes lb-flow { to { background-position: 12px 0; } }
+@keyframes lb-flow-y { to { background-position: 0 10px; } }
+
+/* A slow breathing glow behind featured imagery */
+.lb-breathe { animation: lb-breathe 7s ease-in-out infinite; }
+@keyframes lb-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.06); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

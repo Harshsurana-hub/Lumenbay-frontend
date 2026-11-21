@@ -1,21 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
-  Star,
-  Shield,
+  ArrowLeft,
+  ArrowUpRight,
+  Check,
   ChevronLeft,
+  ChevronRight,
   Heart,
+  Lock,
+  MessageCircle,
   Share2,
-  CheckCircle,
-  Zap,
-  Store,
-  Package,
+  Shield,
+  ShieldCheck,
+  Star,
 } from "lucide-react";
 import type { Product } from "@/lib/products";
 import BuyWithEscrowDialog from "@/components/escrow/BuyWithEscrowDialog";
+import ProductCard from "@/components/marketplace/ProductCard";
+import PriceTag, { XlmAmount } from "@/components/shop/PriceTag";
+import ListingPlaceholder from "@/components/shop/ListingPlaceholder";
+import EscrowJourney from "@/components/shop/EscrowJourney";
+import { isWishlisted, toggleWishlist } from "@/lib/wishlistStore";
+import { formatUsd } from "@/lib/money";
+import { initialsOf, splitAmount, toneFor } from "@/lib/shopDisplay";
+import { cn } from "@/lib/utils";
+
+const BADGE_LABELS = { flash: "Deal", hot: "Trending", new: "New" } as const;
 
 export default function ProductDetailView({
   product,
@@ -31,343 +44,420 @@ export default function ProductDetailView({
   const [activeImg, setActiveImg] = useState(0);
   const [wishlisted, setWishlisted] = useState(false);
   const [buying, setBuying] = useState(false);
+  const [shared, setShared] = useState(false);
+
+  // The heart used to be local state only, so saving here never reached the
+  // wishlist page. It now shares the store the product cards use.
+  useEffect(() => {
+    const update = () => setWishlisted(isWishlisted(product.id));
+    update();
+    window.addEventListener("wishlist-change", update);
+    return () => window.removeEventListener("wishlist-change", update);
+  }, [product.id]);
 
   const discountSaving = product.originalUsdPrice - product.usdPrice;
+  const discounted = discountSaving > 0;
+  const percent =
+    product.discountPercent > 0
+      ? product.discountPercent
+      : discounted
+        ? Math.round((discountSaving / product.originalUsdPrice) * 100)
+        : 0;
+
+  const showImage = (index: number) => setActiveImg((index + images.length) % images.length);
+
+  async function share() {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: product.name, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+    } catch {
+      /* the user dismissed the share sheet */
+    }
+  }
+
+  const sellerTone = toneFor(product.sellerId);
+  const hasSellerRecord = (product.sellerSales ?? 0) > 0;
+  const xlmParts = splitAmount(product.xlmPrice);
 
   return (
-    <div className="min-h-screen bg-bg">
-      <div className="max-w-6xl mx-auto px-4 pt-20 pb-12">
-
+    <div className="min-h-screen bg-bg pb-28 lg:pb-0">
+      <div className="mx-auto max-w-[1360px] px-4 pt-[108px] sm:px-6">
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-xs text-ink-faint mb-6">
-          <Link href="/home" className="hover:text-accent-hover transition-colors">Home</Link>
-          <span>/</span>
-          <span className="hover:text-accent-hover transition-colors cursor-pointer">{product.category}</span>
-          <span>/</span>
-          <span className="text-ink-muted truncate max-w-[200px]">{product.name}</span>
-        </nav>
+        <div className="flex items-center justify-between gap-4">
+          <nav aria-label="Breadcrumb" className="min-w-0">
+            <ol className="flex min-w-0 items-center gap-2 text-xs text-ink-faint">
+              <li>
+                <Link href="/home" className="inline-flex items-center gap-1.5 font-semibold text-ink-muted transition-colors hover:text-accent">
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                  Discover
+                </Link>
+              </li>
+              <li aria-hidden>/</li>
+              <li>
+                <Link
+                  href={`/home?category=${encodeURIComponent(product.category)}`}
+                  className="transition-colors hover:text-accent"
+                >
+                  {product.category}
+                </Link>
+              </li>
+              <li aria-hidden className="hidden sm:block">/</li>
+              <li className="hidden min-w-0 truncate text-ink-muted sm:block" aria-current="page">
+                {product.name}
+              </li>
+            </ol>
+          </nav>
+        </div>
 
-        {/* Back button */}
-        <Link
-          href="/home"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-accent-hover transition-colors mb-6"
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-          Back to listings
-        </Link>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* ── Left: Image Gallery ── */}
-          <div className="space-y-3">
-            {/* Main image */}
-            <div className="relative bg-surface border border-line rounded-2xl overflow-hidden aspect-square flex items-center justify-center">
+        <div className="mt-5 grid gap-8 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12 xl:gap-x-16">
+          {/* ── Gallery ── */}
+          <div className="min-w-0">
+            <div className="group relative aspect-[4/5] overflow-hidden rounded-[28px] border border-line bg-surface-2 sm:aspect-square sm:rounded-[36px]">
               {hasImages ? (
                 <Image
+                  key={images[activeImg]}
                   src={images[activeImg]}
                   alt={`${product.name} — photograph ${activeImg + 1} of ${images.length}`}
                   fill
-                  sizes="(max-width: 1024px) 100vw, 560px"
+                  sizes="(max-width: 1024px) 100vw, 760px"
                   className="object-cover"
                   priority
                 />
               ) : (
-                <div className="w-full h-full bg-surface-2 flex items-center justify-center">
-                  <Package className="w-24 h-24 text-ink-faint" />
+                <ListingPlaceholder seed={product.id} category={product.category} size="hero" />
+              )}
+
+              {(percent > 0 || product.badge) && (
+                <div className="absolute left-4 top-4 flex flex-wrap gap-1.5 sm:left-5 sm:top-5">
+                  {percent > 0 && (
+                    <span className="tnum rounded-full bg-white/90 px-3 py-1.5 text-xs font-bold text-[#B2271B] shadow-sm backdrop-blur-md">
+                      −{percent}%
+                    </span>
+                  )}
+                  {product.badge && (
+                    <span className="rounded-full bg-[#14151C]/80 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md">
+                      {BADGE_LABELS[product.badge]}
+                    </span>
+                  )}
                 </div>
               )}
 
-              {/* Badge overlay */}
-              <div className="absolute top-3 left-3 flex flex-col gap-1.5">
-                {product.discountPercent > 0 && (
-                  <span className="bg-accent text-on-accent text-[11px] font-bold px-2 py-0.5 rounded-md">
-                    -{product.discountPercent}%
-                  </span>
-                )}
-                {product.badge === "flash" && (
-                  <span className="bg-orange-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-0.5">
-                    <Zap className="w-3 h-3" /> Flash
-                  </span>
-                )}
-                {product.badge === "hot" && (
-                  <span className="bg-bad text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
-                    🔥 Hot
-                  </span>
-                )}
-                {product.badge === "new" && (
-                  <span className="bg-blue-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
-                    New
-                  </span>
-                )}
-              </div>
-
-              {/* Wishlist & Share */}
-              <div className="absolute top-3 right-3 flex flex-col gap-2">
-                <button
-                  onClick={() => setWishlisted((v: boolean) => !v)}
-                  className="w-8 h-8 rounded-full bg-surface shadow-sm border border-line flex items-center justify-center hover:border-red-300 transition-colors"
-                  aria-label="Add to wishlist"
-                >
-                  <Heart
-                    className={`w-4 h-4 ${wishlisted ? "fill-bad text-bad" : "text-ink-faint"}`}
-                  />
-                </button>
-                <button
-                  className="w-8 h-8 rounded-full bg-surface shadow-sm border border-line flex items-center justify-center hover:border-accent transition-colors"
-                  aria-label="Share product"
-                >
-                  <Share2 className="w-4 h-4 text-ink-faint" />
-                </button>
-              </div>
-
-              {/* Image counter pill */}
               {images.length > 1 && (
-                <div className="absolute bottom-3 right-3 bg-ink/70 text-bg text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                  {activeImg + 1} / {images.length}
-                </div>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => showImage(activeImg - 1)}
+                    aria-label="Previous photograph"
+                    className="absolute left-4 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-[#14151C] shadow-md backdrop-blur-md transition hover:bg-white sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                  >
+                    <ChevronLeft className="h-5 w-5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => showImage(activeImg + 1)}
+                    aria-label="Next photograph"
+                    className="absolute right-4 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-[#14151C] shadow-md backdrop-blur-md transition hover:bg-white sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden />
+                  </button>
+                  <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/40 px-2.5 py-2 backdrop-blur-md" aria-hidden>
+                    {images.map((url, i) => (
+                      <span
+                        key={url}
+                        className={cn("h-1.5 rounded-full transition-all", i === activeImg ? "w-5 bg-white" : "w-1.5 bg-white/50")}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
+
+              <span className="absolute bottom-4 right-4 hidden items-center gap-1.5 rounded-full border border-white/20 bg-black/40 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-md sm:inline-flex">
+                <ShieldCheck className="h-3.5 w-3.5 text-[#FFB4A2]" aria-hidden />
+                Escrow protected
+              </span>
             </div>
 
-            {/* Thumbnails */}
             {images.length > 1 && (
-              <div className="flex gap-2">
+              <div className="lb-rail mt-3 flex gap-2.5 overflow-x-auto">
                 {images.map((url, i) => (
                   <button
                     key={url}
+                    type="button"
                     onClick={() => setActiveImg(i)}
                     aria-label={`Show photograph ${i + 1}`}
                     aria-current={activeImg === i}
-                    className={`relative w-16 h-16 overflow-hidden rounded-lg border-2 bg-surface-2 transition-colors ${
-                      activeImg === i
-                        ? "border-accent"
-                        : "border-line hover:border-line-strong"
-                    }`}
+                    className={cn(
+                      "relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-2 bg-surface-2 transition-all",
+                      activeImg === i ? "border-accent" : "border-transparent opacity-60 hover:opacity-100",
+                    )}
                   >
-                    <Image src={url} alt="" fill sizes="64px" className="object-cover" />
+                    <Image src={url} alt="" fill sizes="80px" className="object-cover" />
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          {/* ── Right: Product Info ── */}
-          <div className="flex flex-col gap-5">
-            {/* Category chip */}
-            <span className="inline-flex w-fit text-[11px] font-semibold text-accent bg-accent-soft border border-accent-line px-2.5 py-0.5 rounded-full">
-              {product.category}
-            </span>
-
-            {/* Name */}
-            <h1 className="text-xl font-black text-ink leading-snug">
-              {product.name}
-            </h1>
-
-            {/* Rating row */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <Star
-                    key={star}
-                    className={`w-3.5 h-3.5 ${
-                      star <= Math.round(product.rating)
-                        ? "fill-warn text-warn"
-                        : "text-gray-200 fill-gray-200"
-                    }`}
-                  />
-                ))}
-              </div>
-              <span className="text-sm font-bold text-ink-muted">{product.rating}</span>
-              <span className="text-xs text-ink-faint">({product.reviewCount} reviews)</span>
-            </div>
-
-            {/* Pricing */}
-            <div className="bg-surface border border-line rounded-xl p-4 space-y-2">
-              <div className="flex items-baseline gap-2.5">
-                <span className="text-3xl font-black text-accent">
-                  ${product.usdPrice.toLocaleString()}
-                </span>
-                {product.originalUsdPrice > product.usdPrice && (
-                  <span className="text-base text-ink-faint line-through">
-                    ${product.originalUsdPrice.toLocaleString()}
-                  </span>
-                )}
-                {discountSaving > 0 && (
-                  <span className="text-xs font-bold text-accent bg-accent-soft px-2 py-0.5 rounded-full">
-                    Save ${discountSaving}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-black text-ink-muted">
-                  {product.xlmPrice.toLocaleString()} XLM
-                </span>
-                <span className="text-xs text-ink-faint">≈ ${product.usdPrice}</span>
-                <span className="text-[10px] text-ink-faint bg-surface-2 px-1.5 py-0.5 rounded font-medium">
-                  Stellar Network
-                </span>
-              </div>
-            </div>
-
-            {/* Escrow trust strip */}
-            <div className="flex items-start gap-2.5 bg-accent-soft border border-accent-line rounded-xl p-3.5">
-              <Shield className="w-5 h-5 text-accent shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold text-ok">Protected by Stellar Escrow</p>
-                <p className="text-[11px] text-accent leading-relaxed mt-0.5">
-                  Funds are held in a smart contract until you confirm delivery. Safe, transparent, and trustless.
-                </p>
-              </div>
-            </div>
-
-            {/* CTA */}
-            <div className="flex flex-col gap-2.5">
-              <button
-                type="button"
-                onClick={() => setBuying(true)}
-                className="w-full rounded-xl bg-linear-to-r from-[#E0483B] to-[#FF7A59] py-3.5 text-sm font-bold text-white shadow-lg shadow-red-500/25 transition hover:brightness-110 flex items-center justify-center gap-2"
-              >
-                <Shield className="w-4 h-4" />
-                Buy with escrow
-              </button>
-
-              <p className="text-center text-xs leading-relaxed text-ink-muted">
-                Your XLM goes into a Stellar smart contract, not to the seller and not to us, and is
-                only released when you confirm the item arrived.
-              </p>
-            </div>
-
-            {/* Delivery / guarantee chips */}
-            <div className="flex flex-wrap gap-2">
-              {[
-                { icon: <CheckCircle className="w-3.5 h-3.5 text-accent" />, label: "Buyer Protection" },
-                { icon: <Package className="w-3.5 h-3.5 text-accent" />, label: "Fast Shipping" },
-                { icon: <Shield className="w-3.5 h-3.5 text-accent" />, label: "Secure Payment" },
-              ].map(({ icon, label }) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-ink-muted bg-surface border border-line px-2.5 py-1 rounded-full"
+          {/* ── Purchase panel ── */}
+          <div className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+            <div className="lg:sticky lg:top-[120px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/home?category=${encodeURIComponent(product.category)}`}
+                  className="rounded-full border border-accent-line bg-accent-soft px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-accent transition-colors hover:border-accent"
                 >
-                  {icon}
-                  {label}
-                </div>
-              ))}
-            </div>
-
-            {/* Description */}
-            {product.description && (
-              <div className="space-y-2">
-                <h2 className="text-sm font-black text-ink">About this item</h2>
-                <p className="text-sm text-ink-muted leading-relaxed">{product.description}</p>
+                  {product.category}
+                </Link>
+                {product.reviewCount > 0 ? (
+                  <span className="flex items-center gap-1.5 text-sm">
+                    <span className="flex items-center gap-0.5" aria-hidden>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            star <= Math.round(product.rating) ? "fill-[#F5A25D] text-[#F5A25D]" : "fill-line text-line",
+                          )}
+                        />
+                      ))}
+                    </span>
+                    <span className="tnum font-semibold text-ink">{product.rating.toFixed(1)}</span>
+                    <span className="tnum text-ink-faint">
+                      ({product.reviewCount} {product.reviewCount === 1 ? "review" : "reviews"})
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink-faint">No reviews yet</span>
+                )}
               </div>
-            )}
 
-            {/* Seller card */}
-            <div className="bg-surface border border-line rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-black text-ink">Seller</h2>
+              <h1 className="font-display mt-4 text-[32px] font-bold leading-[1.02] tracking-[-0.03em] text-ink sm:text-[44px]">
+                {product.name}
+              </h1>
+
+              <p className="mt-3 text-sm text-ink-muted">
+                Sold by{" "}
                 <Link
                   href={`/seller/${product.sellerId}`}
-                  className="text-xs font-semibold text-accent hover:text-accent-hover"
+                  className="font-semibold text-ink underline decoration-line-strong underline-offset-4 transition-colors hover:text-accent hover:decoration-accent"
                 >
-                  View store →
+                  {product.seller}
                 </Link>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-on-accent text-sm font-black shrink-0">
-                  {product.seller.charAt(0).toUpperCase()}
+              </p>
+
+              {/* Price + action */}
+              <div className="relative mt-6 overflow-hidden rounded-[28px] border border-line bg-surface p-5 shadow-panel sm:p-6">
+                <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent-soft blur-2xl" />
+                <div className="relative">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="label">You pay</p>
+                    {discounted && (
+                      <span className="tnum rounded-full bg-deal-bg px-2.5 py-1 text-xs font-bold text-deal">
+                        You save {formatUsd(discountSaving)}
+                      </span>
+                    )}
+                  </div>
+                  <PriceTag
+                    className="mt-2"
+                    xlm={product.xlmPrice}
+                    usd={product.usdPrice}
+                    originalUsd={discounted ? product.originalUsdPrice : undefined}
+                    size="xl"
+                  />
+
+                  <div className="mt-6 flex gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setBuying(true)}
+                      className="group relative flex flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl bg-linear-to-r from-[#E0483B] to-[#FF7A59] py-4 text-[15px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(224,72,59,0.8)] transition hover:brightness-110"
+                    >
+                      <span className="lb-sheen absolute inset-0 opacity-40" aria-hidden />
+                      <Shield className="h-4 w-4" aria-hidden />
+                      Buy with escrow
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWishlisted(toggleWishlist(product.id))}
+                      aria-label={wishlisted ? "Remove from wishlist" : "Save to wishlist"}
+                      aria-pressed={wishlisted}
+                      className={cn(
+                        "grid w-14 shrink-0 place-items-center rounded-2xl border transition-colors",
+                        wishlisted
+                          ? "border-accent-line bg-accent-soft text-accent"
+                          : "border-line-strong text-ink-muted hover:border-ink hover:text-ink",
+                      )}
+                    >
+                      <Heart className={cn("h-5 w-5", wishlisted && "fill-current")} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={share}
+                      aria-label={shared ? "Link copied" : "Share this listing"}
+                      className="grid w-14 shrink-0 place-items-center rounded-2xl border border-line-strong text-ink-muted transition-colors hover:border-ink hover:text-ink"
+                    >
+                      {shared ? <Check className="h-5 w-5 text-ok" aria-hidden /> : <Share2 className="h-5 w-5" aria-hidden />}
+                    </button>
+                  </div>
+                  <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-ink-muted">
+                    <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
+                    Your XLM goes into a Stellar smart contract, not to the seller and not to us, and
+                    is only released when you confirm the item arrived.
+                  </p>
+                  <span className="sr-only" role="status">
+                    {shared ? "Link copied to clipboard" : ""}
+                  </span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
+              </div>
+
+              {/* Escrow explainer */}
+              <div className="mt-4 rounded-[28px] border border-line bg-surface p-5 sm:p-6">
+                <div className="mb-5 flex items-center justify-between gap-3">
+                  <p className="font-display text-lg font-bold text-ink">How this purchase is protected</p>
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-accent" aria-hidden />
+                </div>
+                <EscrowJourney variant="panel" amount={`${xlmParts.whole}${xlmParts.fraction} XLM`} />
+              </div>
+
+              {/* Seller */}
+              <div className="mt-4 rounded-[28px] border border-line bg-surface p-5 sm:p-6">
+                <div className="flex items-center gap-3.5">
+                  <span
+                    className="font-display grid h-12 w-12 shrink-0 place-items-center rounded-full text-sm font-bold text-white"
+                    style={{ background: `linear-gradient(135deg, ${sellerTone.to}, ${sellerTone.from})` }}
+                    aria-hidden
+                  >
+                    {initialsOf(product.seller)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="label">Seller</p>
                     <Link
                       href={`/seller/${product.sellerId}`}
-                      className="truncate text-sm font-bold text-ink hover:text-accent"
+                      className="mt-0.5 block truncate font-semibold text-ink hover:text-accent"
                     >
                       {product.seller}
                     </Link>
-                    <CheckCircle className="w-3.5 h-3.5 text-accent shrink-0" />
-                  </div>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <div className="flex items-center gap-0.5">
-                      <Star className="w-3 h-3 fill-warn text-warn" />
-                      <span className="text-[11px] font-semibold text-ink-muted">
-                        {product.sellerRating ?? "N/A"}
-                      </span>
-                    </div>
-                    {product.sellerSales != null && (
-                      <div className="flex items-center gap-1">
-                        <Store className="w-3 h-3 text-ink-faint" />
-                        <span className="text-[11px] text-ink-faint">
-                          {product.sellerSales.toLocaleString()} sales
-                        </span>
-                      </div>
-                    )}
+                    <p className="tnum mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted">
+                      {hasSellerRecord ? (
+                        <>
+                          <Star className="h-3 w-3 fill-[#F5A25D] text-[#F5A25D]" aria-hidden />
+                          <span className="font-semibold text-ink">{(product.sellerRating ?? 0).toFixed(1)}</span>
+                          <span aria-hidden>·</span>
+                          {(product.sellerSales ?? 0).toLocaleString()} completed sales
+                        </>
+                      ) : (
+                        "New seller, no completed sales yet"
+                      )}
+                    </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled
-                  title="Messaging between buyers and sellers is not built yet"
-                  className="shrink-0 cursor-not-allowed rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[11px] font-semibold text-ink-faint"
-                >
-                  Contact — soon
-                </button>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Link
+                    href={`/seller/${product.sellerId}`}
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90"
+                  >
+                    Visit shop
+                    <ArrowUpRight className="h-4 w-4" aria-hidden />
+                  </Link>
+                  <button
+                    type="button"
+                    disabled
+                    title="Messaging between buyers and sellers is not built yet"
+                    className="flex cursor-not-allowed items-center justify-center gap-1.5 rounded-xl border border-line py-2.5 text-sm font-semibold text-ink-faint"
+                  >
+                    <MessageCircle className="h-4 w-4" aria-hidden />
+                    Contact — soon
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* ── About ── */}
+          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            <section className="border-t border-line pt-8 lg:mt-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-accent">About this item</p>
+              {product.description ? (
+                <p className="mt-4 max-w-2xl whitespace-pre-line text-[17px] leading-[1.7] text-ink">
+                  {product.description}
+                </p>
+              ) : (
+                <p className="mt-4 text-sm text-ink-faint">The seller has not added a description.</p>
+              )}
+
+              <dl className="mt-8 grid max-w-2xl grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
+                {[
+                  ["Category", product.category],
+                  ["Price in USD", formatUsd(product.usdPrice)],
+                  ["Settlement", "Stellar escrow"],
+                  ["Listing", product.id.slice(0, 8)],
+                ].map(([term, detail]) => (
+                  <div key={term} className="bg-surface px-4 py-3.5">
+                    <dt className="label">{term}</dt>
+                    <dd className={cn("mt-1 truncate text-sm font-semibold text-ink", term === "Listing" && "font-mono")}>
+                      {detail}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          </div>
         </div>
 
-        {/* ── Related products strip ── */}
-        <RelatedProducts category={product.category} related={related} />
+        {/* ── Related ── */}
+        {related.length > 0 && (
+          <section className="mt-20 border-t border-line pt-12 sm:mt-28">
+            <div className="mb-8 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-accent">Keep looking</p>
+                <h2 className="font-display mt-2 text-[28px] font-bold tracking-[-0.02em] text-ink sm:text-[36px]">
+                  More in {product.category}
+                </h2>
+              </div>
+              <Link
+                href={`/home?category=${encodeURIComponent(product.category)}`}
+                className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line-strong px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-ink"
+              >
+                View all
+                <ArrowUpRight className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden />
+              </Link>
+            </div>
+            <ul className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+              {related.map((p) => (
+                <li key={p.id}>
+                  <ProductCard product={p} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <div className="h-16 sm:h-24" />
+      </div>
+
+      {/* Mobile purchase bar */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-bg/90 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <XlmAmount amount={product.xlmPrice} size="sm" />
+            <p className="tnum mt-0.5 text-[11px] text-ink-muted">≈ {formatUsd(product.usdPrice)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBuying(true)}
+            className="flex shrink-0 items-center gap-2 rounded-2xl bg-linear-to-r from-[#E0483B] to-[#FF7A59] px-5 py-3.5 text-sm font-bold text-white shadow-[0_10px_24px_-10px_rgba(224,72,59,0.8)]"
+          >
+            <Shield className="h-4 w-4" aria-hidden />
+            Buy with escrow
+          </button>
+        </div>
       </div>
 
       {buying && <BuyWithEscrowDialog product={product} onClose={() => setBuying(false)} />}
     </div>
-  );
-}
-
-function RelatedProducts({
-  category,
-  related,
-}: {
-  category: string;
-  related: Product[];
-}) {
-  if (related.length === 0) return null;
-
-  return (
-    <section className="mt-12">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-black text-ink">More in {category}</h2>
-        <Link href="/home" className="text-xs font-semibold text-accent hover:text-accent-hover">
-          View all →
-        </Link>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {related.map((p) => (
-          <Link
-            key={p.id}
-            href={`/product/${p.id}`}
-            className="bg-surface border border-line rounded-xl overflow-hidden hover:shadow-md transition-shadow group"
-          >
-            <div className="relative h-32 bg-surface-2 flex items-center justify-center">
-              <Package className="w-12 h-12 text-ink-faint" />
-              {p.discountPercent > 0 && (
-                <span className="absolute top-2 left-2 bg-accent text-on-accent text-[10px] font-bold px-1.5 py-0.5 rounded">
-                  -{p.discountPercent}%
-                </span>
-              )}
-            </div>
-            <div className="p-3">
-              <p className="text-xs text-ink-muted font-semibold line-clamp-2 min-h-[2.5rem] leading-snug mb-1">
-                {p.name}
-              </p>
-              <span className="text-sm font-black text-accent">${p.usdPrice}</span>
-              <p className="text-[10px] text-ink-faint font-semibold">
-                ≈ {p.xlmPrice.toLocaleString()} XLM
-              </p>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
   );
 }

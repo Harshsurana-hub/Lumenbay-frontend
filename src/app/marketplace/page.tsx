@@ -69,13 +69,14 @@ async function MarketplaceResults({ searchParams }: PageProps) {
       pageCount={result.pageCount}
       search={search}
       sort={sort}
+      pageSize={PAGE_SIZE}
     />
   );
 }
 
 export default function MarketplacePage({ searchParams }: PageProps) {
   return (
-    <div className="min-h-screen bg-bg pt-24">
+    <div className="min-h-screen bg-bg pt-[108px]">
       {/* Keyed on the query so changing a filter shows the loading state
           rather than the previous results sitting there looking current. */}
       <Suspense fallback={<MarketplaceLoadingState />}>
