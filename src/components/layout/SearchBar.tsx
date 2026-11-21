@@ -27,7 +27,7 @@ export default function SearchBar() {
     params.delete("page");
 
     // Always navigate to home/explore so search works everywhere
-    const targetPath = pathname.startsWith("/dashboard") ? "/" : pathname;
+    const targetPath = pathname.startsWith("/dashboard") ? "/home" : pathname;
     router.push(`${targetPath}?${params.toString()}`, { scroll: false });
   }, [debouncedQuery, router, pathname, searchParams]);
 

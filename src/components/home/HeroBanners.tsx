@@ -46,7 +46,7 @@ export default function HeroBanners() {
 
       <div className="flex flex-1 flex-col gap-3">
         <Link
-          href="/?category=Electronics"
+          href="/home?category=Electronics"
           className="group flex-1 rounded-xl border border-accent-line bg-accent-soft p-4 transition-colors hover:border-accent"
         >
           <p className="text-sm font-bold text-ink transition-colors group-hover:text-accent">
@@ -56,7 +56,7 @@ export default function HeroBanners() {
         </Link>
 
         <Link
-          href="/?category=Fashion"
+          href="/home?category=Fashion"
           className="group flex-1 rounded-xl border border-line bg-surface-2 p-4 transition-colors hover:border-line-strong"
         >
           <p className="text-sm font-bold text-ink transition-colors group-hover:text-accent">

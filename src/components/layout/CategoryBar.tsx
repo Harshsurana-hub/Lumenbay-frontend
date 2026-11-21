@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { isStandalonePage } from "@/lib/standalonePages";
 
 const CATEGORIES = [
   { label: "All Categories", value: "" },
@@ -20,7 +21,7 @@ export default function CategoryBar() {
   const currentCategory = searchParams.get("category") ?? searchParams.get("cat") ?? "";
 
   if (
-    pathname.startsWith("/auth") ||
+    isStandalonePage(pathname) ||
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/profile")
   )
@@ -43,7 +44,7 @@ export default function CategoryBar() {
         {CATEGORIES.map((cat) => (
           <Link
             key={cat.value || "all"}
-            href={cat.value ? `/?category=${cat.value}` : "/"}
+            href={cat.value ? `/home?category=${cat.value}` : "/home"}
             className={`px-3 py-1 text-xs font-semibold whitespace-nowrap transition-colors rounded-sm ${
               currentCategory === cat.value && pathname !== "/marketplace"
                 ? "text-white font-bold bg-black/20"

@@ -38,7 +38,7 @@ export default function ProductDetailView({
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-ink-faint mb-6">
-          <Link href="/" className="hover:text-accent-hover transition-colors">Home</Link>
+          <Link href="/home" className="hover:text-accent-hover transition-colors">Home</Link>
           <span>/</span>
           <span className="hover:text-accent-hover transition-colors cursor-pointer">{product.category}</span>
           <span>/</span>
@@ -47,7 +47,7 @@ export default function ProductDetailView({
 
         {/* Back button */}
         <Link
-          href="/"
+          href="/home"
           className="inline-flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-accent-hover transition-colors mb-6"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
@@ -334,7 +334,7 @@ function RelatedProducts({
     <section className="mt-12">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-base font-black text-ink">More in {category}</h2>
-        <Link href="/" className="text-xs font-semibold text-accent hover:text-accent-hover">
+        <Link href="/home" className="text-xs font-semibold text-accent hover:text-accent-hover">
           View all →
         </Link>
       </div>

@@ -5,18 +5,27 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './env';
 /**
  * Routes that require a signed-in user.
  *
- * Listing what is *protected* rather than what is public is the wrong way
- * round for anything holding real data — a route added later is public by
- * default, which is how a dashboard ends up readable by anyone. It is the
- * right way round here because this app is a storefront: the catalogue, the
- * product pages and search are meant to be open, and only the account area is
- * not. Anything under these prefixes is covered, so a new dashboard tab is
- * protected the moment it exists.
+ * During early access the whole marketplace sits behind sign-in: visitors see
+ * the landing page at `/`, and the catalogue, product pages, search and seller
+ * stores open up once they have an account. Anything under these prefixes is
+ * covered, so a new tab in any of these areas is protected the moment it
+ * exists.
  */
-const PROTECTED_PREFIXES = ['/dashboard', '/profile'];
+const PROTECTED_PREFIXES = [
+  '/home',
+  '/marketplace',
+  '/product',
+  '/search',
+  '/seller',
+  '/dashboard',
+  '/profile',
+];
 
 /** Routes a signed-in user has no reason to see. */
 const AUTH_ONLY_PREFIXES = ['/auth/login', '/auth/register'];
+
+/** Where a signed-in user lands instead of the landing page or auth screens. */
+export const SIGNED_IN_HOME = '/home';
 
 function matches(pathname: string, prefixes: string[]): boolean {
   return prefixes.some(
@@ -73,8 +82,16 @@ export async function updateSession(request: NextRequest) {
 
   if (user && matches(pathname, AUTH_ONLY_PREFIXES)) {
     const home = request.nextUrl.clone();
-    home.pathname = '/dashboard/orders';
+    home.pathname = SIGNED_IN_HOME;
     home.search = '';
+    return NextResponse.redirect(home);
+  }
+
+  // The landing page is for visitors; a signed-in user goes straight to the
+  // marketplace. The query string is kept so old `/?category=` links still work.
+  if (user && pathname === '/') {
+    const home = request.nextUrl.clone();
+    home.pathname = SIGNED_IN_HOME;
     return NextResponse.redirect(home);
   }
 

@@ -84,7 +84,7 @@ export default function FlashSaleSection({ products }: { products: Product[] }) 
             ))}
           </div>
         </div>
-        <Link href="/" className="text-xs font-semibold text-accent hover:text-accent-hover">
+        <Link href="/home" className="text-xs font-semibold text-accent hover:text-accent-hover">
           View All →
         </Link>
       </div>

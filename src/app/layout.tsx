@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree, JetBrains_Mono } from "next/font/google";
+import { Figtree, JetBrains_Mono, Syne } from "next/font/google";
 import "./globals.css";
 
 /**
@@ -12,6 +12,14 @@ const figtree = Figtree({
   variable: "--font-figtree",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+/** Display face for headlines and the wordmark; body copy stays in Figtree. */
+const syne = Syne({
+  variable: "--font-syne",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
   display: "swap",
 });
 
@@ -96,7 +104,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#FBFBFD" },
-    { media: "(prefers-color-scheme: dark)", color: "#0C0D13" },
+    { media: "(prefers-color-scheme: dark)", color: "#0A0A0A" },
   ],
 };
 
@@ -110,7 +118,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${figtree.variable} ${jetbrains.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${figtree.variable} ${syne.variable} ${jetbrains.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

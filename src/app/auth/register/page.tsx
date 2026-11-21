@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import AuthBrandPanel from "@/components/auth/AuthBrandPanel";
 
 type FormErrors = {
   firstName?: string;
@@ -87,30 +88,31 @@ export default function RegisterPage() {
   const isSeller = role === "SELLER";
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left panel */}
-      <div className="hidden lg:flex w-[42%] bg-ink flex-col justify-between p-10">
-        <div className="flex items-center gap-1.5">
-          <Image src="/logo-icon.png" alt="" width={20} height={20} />
-          <span className="text-sm font-black text-white">Lumenbay</span>
-        </div>
-        <div>
-          <p className="text-3xl font-black text-white leading-tight tracking-tight mb-3">
-            &ldquo;Join 12,000+<br />traders worldwide.&rdquo;
-          </p>
-          <p className="text-sm text-ink-faint leading-relaxed">
-            Whether you&apos;re buying the latest tech or selling handmade goods,
-            Lumenbay keeps every transaction safe with escrow smart contracts.
-          </p>
-        </div>
-        <p className="text-xs text-ink-muted">&copy; 2026 Lumenbay</p>
-      </div>
+    <div className="relative min-h-screen flex">
+      <AuthBrandPanel
+        headline={
+          <>
+            Buy and sell
+            <br />
+            <span className="bg-linear-to-r from-[#FFD8CC] to-[#FFC4B0] bg-clip-text text-transparent">
+              without the trust gap.
+            </span>
+          </>
+        }
+        body="Whether you're buying the latest tech or selling handmade goods, Lumenbay keeps every transaction safe with escrow smart contracts."
+      />
 
-      {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center bg-surface p-6">
-        <div className="w-full max-w-sm">
+      <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-4 py-10 lg:w-1/2 lg:flex-none lg:bg-surface lg:p-6">
+        <Link href="/" className="relative mb-6 flex items-center gap-2 lg:hidden">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-lg">
+            <Image src="/logo-icon.png" alt="" width={24} height={24} />
+          </span>
+          <span className="font-display text-lg font-extrabold tracking-tight text-white">Lumenbay</span>
+        </Link>
+
+        <div className="relative w-full max-w-sm rounded-3xl border border-white/20 bg-surface p-6 shadow-2xl shadow-orange-950/40 sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
           <div className="mb-6">
-            <h1 className="text-2xl font-black text-ink tracking-tight mb-1">
+            <h1 className="font-display text-3xl font-extrabold text-ink tracking-tight mb-1">
               Create your account
             </h1>
             <p className="text-sm text-ink-faint">Start trading on Lumenbay today</p>
@@ -237,10 +239,10 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className={`w-full font-bold py-2.5 rounded-lg text-white transition-colors flex items-center justify-center gap-2 text-sm mt-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`w-full font-bold py-3 rounded-xl text-white transition hover:brightness-110 shadow-lg flex items-center justify-center gap-2 text-sm mt-1 disabled:opacity-50 disabled:cursor-not-allowed ${
                 isSeller
-                  ? "bg-violet-600 hover:bg-violet-700"
-                  : "bg-accent hover:bg-accent-hover"
+                  ? "bg-linear-to-r from-[#E63946] via-[#F0503F] to-[#FF7A59] shadow-rose-500/25"
+                  : "bg-linear-to-r from-[#E0483B] via-[#F05A47] to-[#FF7A59] shadow-orange-500/25"
               }`}
             >
               {isSubmitting ? (
