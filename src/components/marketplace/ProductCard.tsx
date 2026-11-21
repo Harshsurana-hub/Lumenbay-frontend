@@ -2,21 +2,35 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { Star, Heart } from "lucide-react";
+import { ArrowUpRight, Heart, ShieldCheck, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Product } from "@/lib/products";
 import { isWishlisted, toggleWishlist } from "@/lib/wishlistStore";
-import { formatUsd, formatXlm } from "@/lib/money";
+import PriceTag from "@/components/shop/PriceTag";
+import ListingPlaceholder from "@/components/shop/ListingPlaceholder";
 import { cn } from "@/lib/utils";
 
 /**
  * One listing in a grid.
  *
- * It used to draw a grey square where the photograph goes — every card on the
- * site, regardless of how many images the listing had. Sellers were uploading
- * nothing because nothing they uploaded was ever shown.
+ * Built like a mounted print: the photograph sits inset inside a soft card,
+ * the way a gallery mats a picture, with the price set as type underneath.
+ * The listing's name is the one link; its hit area is stretched over the whole
+ * card, so a screen reader hears one link per listing instead of three, while
+ * the seller link and the wishlist button sit above it as their own controls.
  */
-export default function ProductCard({ product }: { product: Product }) {
+export default function ProductCard({
+  product,
+  priority = false,
+  sizes = "(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 320px",
+  className,
+}: {
+  product: Product;
+  /** Load the photograph eagerly, for cards above the fold. */
+  priority?: boolean;
+  sizes?: string;
+  className?: string;
+}) {
   const [wishlisted, setWishlisted] = useState(false);
 
   useEffect(() => {
@@ -27,123 +41,147 @@ export default function ProductCard({ product }: { product: Product }) {
   }, [product.id]);
 
   function handleWishlist(event: React.MouseEvent) {
-    // The card is a link; without this the click navigates as well.
     event.preventDefault();
     event.stopPropagation();
     setWishlisted(toggleWishlist(product.id));
   }
 
   const cover = product.images?.[0];
+  const discounted = product.originalUsdPrice > product.usdPrice;
+  const discount =
+    product.discountPercent > 0
+      ? product.discountPercent
+      : discounted
+        ? Math.round((1 - product.usdPrice / product.originalUsdPrice) * 100)
+        : 0;
 
   return (
-    <div className="group relative overflow-hidden rounded-lg border border-line bg-surface transition-shadow hover:shadow-panel">
-      <Link href={`/product/${product.id}`} className="block">
-        <div className="relative aspect-square overflow-hidden bg-surface-2">
-          {cover ? (
-            <Image
-              src={cover}
-              alt=""
-              fill
-              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 240px"
-              className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-            />
-          ) : (
-            <div className="grid h-full place-items-center text-xs text-ink-faint">
-              No photograph
-            </div>
-          )}
+    <article
+      className={cn(
+        "group relative flex h-full flex-col rounded-[22px] border border-line bg-surface p-1.5 transition-[transform,box-shadow,border-color] duration-500 ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1 hover:border-line-strong hover:shadow-[0_24px_60px_-28px_rgba(224,72,59,0.45)] sm:p-2",
+        className,
+      )}
+    >
+      {/* Photograph */}
+      <div className="relative aspect-[4/5] overflow-hidden rounded-[16px] bg-surface-2">
+        {cover ? (
+          <Image
+            src={cover}
+            alt=""
+            fill
+            priority={priority}
+            sizes={sizes}
+            className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(.2,.7,.2,1)] group-hover:scale-[1.06]"
+          />
+        ) : (
+          <ListingPlaceholder
+            seed={product.id}
+            category={product.category}
+            className="transition-transform duration-[900ms] ease-[cubic-bezier(.2,.7,.2,1)] group-hover:scale-[1.04]"
+          />
+        )}
 
-          {product.discountPercent > 0 && (
-            <span className="absolute left-2 top-2 rounded bg-deal-bg px-1.5 py-0.5 text-[11px] font-bold text-deal">
-              −{product.discountPercent}%
+        {/* A whisper of shade at the foot of the image, so the seal stays
+            legible over a white product shot. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-linear-to-t from-black/35 to-transparent"
+        />
+
+        {(discount > 0 || product.badge) && (
+          <div className="pointer-events-none absolute left-2 right-11 top-2 flex flex-wrap gap-1 sm:left-2.5 sm:right-12 sm:top-2.5">
+            {discount > 0 && (
+              <span className="tnum rounded-full bg-white/90 px-2 py-1 text-[11px] font-bold leading-none text-[#B2271B] shadow-sm backdrop-blur-md">
+                −{discount}%
+              </span>
+            )}
+            {product.badge && <Badge badge={product.badge} />}
+          </div>
+        )}
+
+        <span className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/40 py-1 pl-1.5 pr-2 text-[10px] font-semibold leading-none text-white backdrop-blur-md sm:bottom-2.5 sm:left-2.5">
+          <ShieldCheck className="h-3 w-3 text-[#FFB4A2]" aria-hidden />
+          <span className="flex">
+            Escrow
+            <span className="hidden max-w-0 overflow-hidden whitespace-pre transition-[max-width] duration-500 group-hover:max-w-[70px] sm:inline">
+              {" protected"}
             </span>
-          )}
+          </span>
+        </span>
+      </div>
 
-          {product.badge && <Badge badge={product.badge} />}
-        </div>
-      </Link>
-
-      {/* Outside the Link, so a screen reader announces it as its own control
-          rather than as part of the listing's name. */}
+      {/* Outside the stretched link's stacking order, so it is its own control */}
       <button
         type="button"
         onClick={handleWishlist}
-        className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors hover:bg-surface"
+        className={cn(
+          "absolute right-3 top-3 z-20 grid h-8 w-8 place-items-center rounded-full backdrop-blur-md transition-all sm:right-4 sm:top-4",
+          wishlisted
+            ? "bg-white text-[#E0483B] shadow-md"
+            : "bg-black/30 text-white hover:bg-white hover:text-[#E0483B]",
+        )}
         aria-label={wishlisted ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}
         aria-pressed={wishlisted}
       >
-        <Heart
-          className={cn(
-            "h-3.5 w-3.5 transition-colors",
-            wishlisted ? "fill-bad text-bad" : "text-ink-faint",
-          )}
-          aria-hidden="true"
-        />
+        <Heart className={cn("h-4 w-4", wishlisted && "fill-current")} aria-hidden="true" />
       </button>
 
-      <div className="p-3">
-        <Link href={`/product/${product.id}`}>
-          <p className="line-clamp-2 min-h-[2.5rem] text-sm leading-snug text-ink">
-            {product.name}
-          </p>
-        </Link>
-
-        <div className="mt-1.5 flex items-baseline gap-1.5">
-          <span className="tnum text-base font-bold text-ink">
-            {formatUsd(product.usdPrice)}
-          </span>
-          {product.originalUsdPrice > product.usdPrice && (
-            <span className="tnum text-xs text-ink-faint line-through">
-              {formatUsd(product.originalUsdPrice)}
-            </span>
-          )}
-        </div>
-        <p className="tnum mt-0.5 text-[11px] text-ink-faint">
-          ≈ {formatXlm(product.xlmPrice)}
-        </p>
-
-        <div className="mt-2 flex items-center justify-between gap-2">
-          {product.reviewCount > 0 ? (
-            <span className="flex items-center gap-1 text-[11px]">
-              <Star className="h-3 w-3 fill-warn text-warn" aria-hidden="true" />
-              <span className="tnum font-semibold text-ink-muted">{product.rating.toFixed(1)}</span>
-              <span className="tnum text-ink-faint">({product.reviewCount})</span>
-            </span>
-          ) : (
-            <span className="text-[11px] text-ink-faint">No reviews yet</span>
-          )}
-
-          {/* Every listing is somebody's. Making the seller reachable from the
-              grid is what turns a pile of items into a marketplace of people
-              you can look up before you buy. */}
+      {/* Details */}
+      <div className="flex flex-1 flex-col px-1.5 pb-1.5 pt-3 sm:px-2 sm:pb-2 sm:pt-3.5">
+        <div className="flex items-center justify-between gap-2 text-[11px]">
           <Link
             href={`/seller/${product.sellerId}`}
-            className="truncate text-[11px] text-ink-muted underline-offset-2 hover:text-accent hover:underline"
+            className="relative z-10 min-w-0 truncate font-semibold text-ink-muted underline-offset-2 transition-colors hover:text-accent hover:underline"
           >
             {product.seller}
           </Link>
+          {product.reviewCount > 0 && (
+            <span className="flex shrink-0 items-center gap-1 text-ink-muted">
+              <Star className="h-3 w-3 fill-[#F5A25D] text-[#F5A25D]" aria-hidden="true" />
+              <span className="tnum font-semibold text-ink">{product.rating.toFixed(1)}</span>
+              <span className="tnum hidden text-ink-faint sm:inline">({product.reviewCount})</span>
+            </span>
+          )}
+        </div>
+
+        <h3 className="mb-3 mt-1 line-clamp-2 min-h-[2.6em] text-[14px] font-medium leading-[1.3] text-ink sm:text-[15px]">
+          <Link
+            href={`/product/${product.id}`}
+            className="outline-none after:absolute after:inset-0 after:z-0 after:rounded-[22px] focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-[var(--accent)]"
+          >
+            {product.name}
+          </Link>
+        </h3>
+
+        <div className="mt-auto flex items-end justify-between gap-2 border-t border-dashed border-line pt-3">
+          <PriceTag
+            xlm={product.xlmPrice}
+            usd={product.usdPrice}
+            originalUsd={discounted ? product.originalUsdPrice : undefined}
+            size="sm"
+          />
+          <span
+            aria-hidden
+            className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-surface-2 text-ink transition-all duration-500 group-hover:bg-linear-to-br group-hover:from-[#E0483B] group-hover:to-[#FF7A59] group-hover:text-white sm:grid"
+          >
+            <ArrowUpRight className="h-4 w-4 transition-transform duration-500 group-hover:rotate-45" />
+          </span>
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
 const BADGES = {
-  flash: { label: "Flash", className: "bg-bad text-white" },
-  hot: { label: "Hot", className: "bg-warn text-white" },
-  new: { label: "New", className: "bg-accent text-on-accent" },
+  flash: "Deal",
+  hot: "Trending",
+  new: "New",
 } as const;
 
 function Badge({ badge }: { badge: "flash" | "hot" | "new" }) {
-  const { label, className } = BADGES[badge];
   return (
-    <span
-      className={cn(
-        "absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-        className,
-      )}
-    >
-      {label}
+    <span className="rounded-full bg-[#14151C]/80 px-2 py-1 text-[10px] font-bold uppercase leading-none tracking-[0.12em] text-white backdrop-blur-md">
+      {BADGES[badge]}
     </span>
   );
 }
