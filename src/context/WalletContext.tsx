@@ -12,25 +12,56 @@ import {
   isOnExpectedNetwork,
 } from "@/lib/stellar/freighter";
 
-/** Set when the user disconnects, so we don't silently reconnect on the next visit. */
-const DISCONNECTED_KEY = "lumenbay-wallet-disconnected";
-
+/**
+ * Wallet state for the signed-in Lumenbay user.
+ *
+ * Freighter's permission is per browser, not per Lumenbay account, so the
+ * connection is scoped to the user here: it resets whenever the user changes,
+ * reconnects silently only when Freighter is on that user's saved payout
+ * wallet, and never changes the payout wallet without an explicit call to
+ * `savePayoutAddress`.
+ */
 interface WalletState {
   address: string | null;
+  /** The user's saved payout wallet (profiles.stellar_address), or null if none. */
+  payoutAddress: string | null;
+  /** Connected wallet differs from the saved payout wallet. */
+  payoutMismatch: boolean;
   installed: boolean;
   networkOk: boolean;
   /** XLM balance, or null while unknown. 0 with `unfunded` for brand-new accounts. */
   balance: number | null;
   unfunded: boolean;
   connecting: boolean;
+  savingPayout: boolean;
   error: string | null;
   connect: () => Promise<string | null>;
   disconnect: () => void;
   refresh: () => Promise<void>;
   fundWithFriendbot: () => Promise<void>;
+  /** Makes the connected wallet this user's payout wallet. */
+  savePayoutAddress: () => Promise<boolean>;
 }
 
 const WalletContext = createContext<WalletState | undefined>(undefined);
+
+/** Last wallet each Lumenbay user connected, so a reload reconnects only their own wallet. */
+const rememberedKey = (userId: string) => `lumenbay-wallet:${userId}`;
+
+function remembered(userId: string): string | null {
+  try {
+    return localStorage.getItem(rememberedKey(userId));
+  } catch {
+    return null;
+  }
+}
+
+function remember(userId: string, address: string | null) {
+  try {
+    if (address) localStorage.setItem(rememberedKey(userId), address);
+    else localStorage.removeItem(rememberedKey(userId));
+  } catch {}
+}
 
 async function fetchXlmBalance(address: string): Promise<{ balance: number; unfunded: boolean }> {
   const res = await fetch(`${STELLAR.horizonUrl}/accounts/${address}`);
@@ -43,13 +74,39 @@ async function fetchXlmBalance(address: string): Promise<{ balance: number; unfu
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
+
   const [address, setAddress] = useState<string | null>(null);
+  const [payoutAddress, setPayoutAddressState] = useState<string | null>(null);
   const [installed, setInstalled] = useState(false);
   const [networkOk, setNetworkOk] = useState(true);
   const [balance, setBalance] = useState<number | null>(null);
   const [unfunded, setUnfunded] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [savingPayout, setSavingPayout] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Each Lumenbay user starts from a clean slate; reconnect only to their own saved wallet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [isInstalled, onNetwork] = await Promise.all([isFreighterInstalled(), isOnExpectedNetwork()]);
+      const saved = userId ? await getPayoutAddress(createClient(), userId).catch(() => null) : null;
+      const known = userId ? [saved, remembered(userId)].filter((a): a is string => !!a) : [];
+      const freighterAddress = known.length ? await getConnectedAddress() : null;
+      if (cancelled) return;
+      setInstalled(isInstalled);
+      setNetworkOk(onNetwork);
+      setPayoutAddressState(saved);
+      setAddress(freighterAddress && known.includes(freighterAddress) ? freighterAddress : null);
+      setBalance(null);
+      setUnfunded(false);
+      setError(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const refresh = useCallback(async () => {
     const [isInstalled, onNetwork] = await Promise.all([isFreighterInstalled(), isOnExpectedNetwork()]);
@@ -65,63 +122,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [address]);
 
-  /** Saves the wallet as the signed-in user's payout address, if it isn't already. */
-  const linkToProfile = useCallback(
-    async (walletAddress: string) => {
-      if (!user) return;
-      const supabase = createClient();
-      const saved = await getPayoutAddress(supabase, user.id);
-      if (saved === walletAddress) return;
-      try {
-        await setPayoutAddress(supabase, user.id, walletAddress);
-      } catch (e) {
-        const duplicate = /duplicate|unique/i.test(e instanceof Error ? e.message : String(e));
-        setError(
-          duplicate
-            ? "This wallet is already linked to another Lumenbay account. Use a different Freighter account for each Lumenbay login."
-            : "Connected, but we couldn't save this wallet to your profile.",
-        );
-      }
-    },
-    [user],
-  );
-
-  // Reconnect quietly if the user approved this site before and didn't disconnect.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const disconnected = (() => {
-        try {
-          return localStorage.getItem(DISCONNECTED_KEY) === "1";
-        } catch {
-          return false;
-        }
-      })();
-      const existing = disconnected ? null : await getConnectedAddress();
-      if (cancelled) return;
-      setInstalled(await isFreighterInstalled());
-      setNetworkOk(await isOnExpectedNetwork());
-      if (existing) setAddress(existing);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!address) return;
-    void refresh();
-    void linkToProfile(address);
-  }, [address, refresh, linkToProfile]);
+    if (address) void refresh();
+  }, [address, refresh]);
 
   const connect = useCallback(async () => {
     setConnecting(true);
     setError(null);
     try {
       const approved = await connectFreighter();
-      try {
-        localStorage.removeItem(DISCONNECTED_KEY);
-      } catch {}
+      if (userId) remember(userId, approved);
       setAddress(approved);
       setNetworkOk(await isOnExpectedNetwork());
       return approved;
@@ -131,16 +141,36 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setConnecting(false);
     }
-  }, []);
+  }, [userId]);
 
   const disconnect = useCallback(() => {
-    try {
-      localStorage.setItem(DISCONNECTED_KEY, "1");
-    } catch {}
+    if (userId) remember(userId, null);
     setAddress(null);
     setBalance(null);
     setUnfunded(false);
-  }, []);
+    setError(null);
+  }, [userId]);
+
+  const savePayoutAddress = useCallback(async () => {
+    if (!userId || !address) return false;
+    setSavingPayout(true);
+    setError(null);
+    try {
+      await setPayoutAddress(createClient(), userId, address);
+      setPayoutAddressState(address);
+      return true;
+    } catch (e) {
+      const duplicate = /duplicate|unique/i.test(e instanceof Error ? e.message : String(e));
+      setError(
+        duplicate
+          ? "This wallet is already the payout wallet of another Lumenbay account. Use a different wallet account for each Lumenbay login."
+          : "Couldn't save your payout wallet. Please try again.",
+      );
+      return false;
+    } finally {
+      setSavingPayout(false);
+    }
+  }, [userId, address]);
 
   const fundWithFriendbot = useCallback(async () => {
     if (!address || !isTestnet) return;
@@ -152,9 +182,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [address, refresh]);
 
+  const payoutMismatch = !!address && !!payoutAddress && address !== payoutAddress;
+
   const value = useMemo<WalletState>(
-    () => ({ address, installed, networkOk, balance, unfunded, connecting, error, connect, disconnect, refresh, fundWithFriendbot }),
-    [address, installed, networkOk, balance, unfunded, connecting, error, connect, disconnect, refresh, fundWithFriendbot],
+    () => ({
+      address,
+      payoutAddress,
+      payoutMismatch,
+      installed,
+      networkOk,
+      balance,
+      unfunded,
+      connecting,
+      savingPayout,
+      error,
+      connect,
+      disconnect,
+      refresh,
+      fundWithFriendbot,
+      savePayoutAddress,
+    }),
+    [address, payoutAddress, payoutMismatch, installed, networkOk, balance, unfunded, connecting, savingPayout, error, connect, disconnect, refresh, fundWithFriendbot, savePayoutAddress],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

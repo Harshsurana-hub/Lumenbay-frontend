@@ -80,14 +80,16 @@ export default function WalletPage() {
                 </>
               ) : (
                 <p className="mt-3 text-sm text-orange-100/80">
-                  Connect Freighter to pay with escrow and receive payouts. Your address is saved as your payout wallet.
+                  Connect your Stellar wallet to pay with escrow. If you sell, you can also make it your payout wallet.
                 </p>
               )}
             </div>
           </div>
 
+          <PayoutPanel />
+
           {!wallet.networkOk && wallet.address && (
-            <Notice>Freighter is on the wrong network. Switch it to {isTestnet ? "Testnet" : "Mainnet"} in the extension, then refresh.</Notice>
+            <Notice>Your wallet is on the wrong network. Switch it to {isTestnet ? "Testnet" : "Mainnet"} in the extension, then refresh.</Notice>
           )}
           {wallet.error && <Notice>{wallet.error}</Notice>}
 
@@ -106,12 +108,12 @@ export default function WalletPage() {
                   />
                 )}
                 <ActionTile icon={<ExternalLink className="h-5 w-5" />} label="Full history on explorer" href={explorerAccount(wallet.address)} />
-                <ActionTile icon={<LogOut className="h-5 w-5" />} label="Disconnect" onClick={wallet.disconnect} />
+                <ActionTile icon={<LogOut className="h-5 w-5" />} label="Disconnect wallet" onClick={wallet.disconnect} />
               </>
             ) : wallet.installed ? (
               <ActionTile
                 icon={wallet.connecting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wallet className="h-5 w-5" />}
-                label="Connect Freighter"
+                label="Connect wallet"
                 onClick={() => wallet.connect()}
               />
             ) : (
@@ -156,6 +158,73 @@ export default function WalletPage() {
           </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Where this user's sales are paid out, and how it relates to the connected wallet. */
+function PayoutPanel() {
+  const wallet = useWallet();
+  const [confirming, setConfirming] = useState(false);
+  const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  const box = "mb-4 rounded-2xl border p-4 text-sm";
+  const btn = "mt-3 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent hover:bg-accent-hover disabled:opacity-60";
+
+  if (!wallet.address) {
+    return wallet.payoutAddress ? (
+      <div className={`${box} border-line bg-surface text-ink-muted`}>
+        Your sales are paid to <span className="font-mono text-ink">{short(wallet.payoutAddress)}</span>. Connect that wallet account to see its balance.
+      </div>
+    ) : null;
+  }
+
+  if (!wallet.payoutAddress) {
+    return (
+      <div className={`${box} border-accent-line bg-accent-soft text-ink`}>
+        <p className="font-bold">Set your payout wallet</p>
+        <p className="mt-1 text-ink-muted">If you sell on Lumenbay, buyers&apos; payments are released to this wallet. You only need this to sell.</p>
+        <button onClick={() => wallet.savePayoutAddress()} disabled={wallet.savingPayout} className={btn}>
+          {wallet.savingPayout && <Loader2 className="h-4 w-4 animate-spin" />} Use {short(wallet.address)} for payouts
+        </button>
+      </div>
+    );
+  }
+
+  if (wallet.payoutMismatch) {
+    return (
+      <div className={`${box} border-warn-line bg-warn-bg text-ink`}>
+        <p className="font-bold">This isn&apos;t your payout wallet</p>
+        <p className="mt-1 text-ink-muted">
+          Your sales are paid to <span className="font-mono text-ink">{short(wallet.payoutAddress)}</span>, but your connected wallet is{" "}
+          <span className="font-mono text-ink">{short(wallet.address)}</span>. To use your payout wallet, switch accounts in your wallet extension and reconnect.
+        </p>
+        {confirming ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-warn">Future sales will be paid to {short(wallet.address)} instead. Continue?</span>
+            <button
+              onClick={async () => {
+                if (await wallet.savePayoutAddress()) setConfirming(false);
+              }}
+              disabled={wallet.savingPayout}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-warn px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+            >
+              {wallet.savingPayout && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Yes, change payout wallet
+            </button>
+            <button onClick={() => setConfirming(false)} className="text-xs font-semibold text-ink-muted">Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirming(true)} className="mt-2 text-xs font-bold text-warn underline">
+            Make {short(wallet.address)} my payout wallet instead
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${box} flex items-center gap-2 border-ok-line bg-ok-bg text-ok`}>
+      <Check className="h-4 w-4" /> Your sales are paid to this wallet.
     </div>
   );
 }

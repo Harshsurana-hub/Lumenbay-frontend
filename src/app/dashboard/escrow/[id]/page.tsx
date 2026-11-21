@@ -13,6 +13,8 @@ import {
   PackageCheck,
   RefreshCw,
   ShieldCheck,
+  ShoppingBag,
+  Store,
   Wallet,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
@@ -141,6 +143,8 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
         {copy && <span className={`rounded-full bg-surface-2 px-3 py-1 text-sm font-bold ${copy.tone}`}>{copy.label}</span>}
       </header>
 
+      {escrow && <RoleBanner role={isBuyer ? "buyer" : isSeller ? "seller" : wallet.address ? "outsider" : "unknown"} status={escrow.status} />}
+
       {loadError && <Alert>{loadError}</Alert>}
       {escrow === null && <Alert>No escrow #{id} exists on {STELLAR.network}.</Alert>}
 
@@ -201,9 +205,6 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
               </div>
             )}
 
-            {isSeller && escrow.status === "Funded" && (
-              <p className="rounded-xl bg-surface-2 p-4 text-sm text-ink-muted">The buyer&apos;s payment is locked. Ship the item; you&apos;ll be paid automatically when they confirm delivery.</p>
-            )}
 
             {actionError && <Alert>{actionError}</Alert>}
           </section>
@@ -216,6 +217,50 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
         <p className="mt-8 flex items-center gap-2 text-sm text-ink-muted"><Loader2 className="h-4 w-4 animate-spin" /> Reading escrow from the Stellar network…</p>
       )}
     </Shell>
+  );
+}
+
+const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
+  buyer: {
+    Pending: "Your payment isn't locked yet. Finish payment to start the escrow.",
+    Funded: "Your money is locked in the contract. Release it once the item arrives, or open a dispute if something is wrong.",
+    Released: "You confirmed delivery and the seller has been paid.",
+    Disputed: "You opened a dispute. Your money stays locked until it's resolved.",
+    Refunded: "The dispute was resolved and your money was refunded.",
+    Cancelled: "This order was cancelled before payment.",
+  },
+  seller: {
+    Pending: "The buyer hasn't locked their payment yet. Don't ship until it shows as funded.",
+    Funded: "The buyer's payment is locked. Ship the item; you're paid automatically when they confirm delivery.",
+    Released: "The buyer confirmed delivery and you've been paid.",
+    Disputed: "The buyer opened a dispute. The payment stays locked until it's resolved.",
+    Refunded: "The dispute was resolved in the buyer's favour.",
+    Cancelled: "This order was cancelled before payment.",
+  },
+};
+
+/** Says plainly which side of this escrow the connected wallet is on. */
+function RoleBanner({ role, status }: { role: "buyer" | "seller" | "outsider" | "unknown"; status: string }) {
+  if (role === "buyer" || role === "seller") {
+    const Icon = role === "buyer" ? ShoppingBag : Store;
+    return (
+      <div className="mt-5 flex items-start gap-3 rounded-2xl border border-accent-line bg-accent-soft p-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
+          <Icon className="h-4 w-4" />
+        </span>
+        <div>
+          <p className="text-sm font-black text-ink">You&apos;re the {role} in this order</p>
+          <p className="text-xs text-ink-muted">{ROLE_COPY[role][status] ?? ""}</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-5 rounded-2xl border border-line bg-surface-2 p-4 text-xs text-ink-muted">
+      {role === "outsider"
+        ? "The connected wallet isn't the buyer or the seller in this order, so you can view it but not act on it. Switch wallet accounts if this is your order."
+        : "Connect your wallet to see whether you're the buyer or the seller in this order."}
+    </div>
   );
 }
 
@@ -293,7 +338,7 @@ function ActionButton({
       }`}
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
-      {busy ? "Waiting for Freighter…" : children}
+      {busy ? "Approve in your wallet…" : children}
     </button>
   );
 }

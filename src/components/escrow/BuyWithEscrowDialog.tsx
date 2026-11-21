@@ -170,13 +170,13 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
                 className="flex items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#E0483B] to-[#FF7A59] py-3.5 text-sm font-bold text-white shadow-lg shadow-red-500/25 transition hover:brightness-110 disabled:opacity-60"
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-                {busy ? "Waiting for Freighter…" : escrowId !== null ? "Retry locking payment" : `Pay ${price.toLocaleString()} XLM into escrow`}
+                {busy ? "Approve in your wallet…" : escrowId !== null ? "Retry locking payment" : `Pay ${price.toLocaleString()} XLM into escrow`}
               </button>
             )
           )}
 
           <p className="text-center text-[11px] leading-relaxed text-ink-faint">
-            Freighter asks you to approve each step. Lumenbay never holds your funds or your keys.
+            Your wallet asks you to approve each step. Lumenbay never holds your funds or your keys.
           </p>
         </div>
       </div>
@@ -198,7 +198,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
       case "connect":
         return (
           <div className={box}>
-            <p>Connect your Freighter wallet to continue.</p>
+            <p>Connect your Stellar wallet to continue.</p>
             <button onClick={() => wallet.connect()} disabled={wallet.connecting} className={btn}>
               {wallet.connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />} Connect wallet
             </button>
@@ -208,14 +208,14 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
       case "network":
         return (
           <div className={box}>
-            <p>Freighter is on the wrong network. Open Freighter, switch the network to <strong className="text-ink">{isTestnet ? "Testnet" : "Mainnet"}</strong>, then check again.</p>
+            <p>Your wallet is on the wrong network. Open it and switch the network to <strong className="text-ink">{isTestnet ? "Testnet" : "Mainnet"}</strong>, then check again.</p>
             <button onClick={() => wallet.refresh()} className={btn}>I&apos;ve switched</button>
           </div>
         );
       case "no-seller-wallet":
         return <div className={box}>This seller hasn&apos;t connected a payout wallet yet, so escrow payments can&apos;t be sent to them. Check back soon.</div>;
       case "own-listing":
-        return <div className={box}>This is your own listing. Use a different Freighter account to test buying it.</div>;
+        return <div className={box}>This is your own listing. Switch to a different wallet account to test buying it.</div>;
       case "balance":
         return (
           <div className={box}>
@@ -242,7 +242,7 @@ function Step({ n, title, body, state, hash }: { n: number; title: string; body:
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-ink">{title}</p>
-        <p className="text-xs text-ink-muted">{state === "signing" ? "Approve in Freighter…" : body}</p>
+        <p className="text-xs text-ink-muted">{state === "signing" ? "Approve in your wallet…" : body}</p>
         {hash && (
           <a href={explorerTx(hash)} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 font-mono text-[11px] text-accent">
             {hash.slice(0, 10)}…{hash.slice(-6)} <ExternalLink className="h-3 w-3" />

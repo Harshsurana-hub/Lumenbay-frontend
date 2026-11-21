@@ -110,6 +110,7 @@ export const viewport: Viewport = {
 
 import Navbar from "@/components/layout/Navbar";
 import CategoryBar from "@/components/layout/CategoryBar";
+import NavigationProgress from "@/components/layout/NavigationProgress";
 import AppProviders from "@/providers/AppProviders";
 import { PageTransition } from "@/components/animations/PageTransition";
 import { Suspense } from "react";
@@ -125,6 +126,9 @@ export default function RootLayout({
       <body className="antialiased" suppressHydrationWarning>
         <AppProviders>
           <a href="#main-content" className="skip-nav">Skip to main content</a>
+          <Suspense>
+            <NavigationProgress />
+          </Suspense>
           <Navbar />
           <Suspense>
             <CategoryBar />

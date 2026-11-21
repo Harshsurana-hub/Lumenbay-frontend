@@ -309,6 +309,15 @@ body {
 
 .lb-float { animation: lb-float 6s ease-in-out infinite; }
 
+/* Navigation progress: races to ~70%, then creeps while the page loads */
+.lb-nav-progress { width: 0; animation: lb-nav-progress 8s cubic-bezier(.1,.6,.2,1) forwards; }
+@keyframes lb-nav-progress {
+  0% { width: 0; }
+  10% { width: 45%; }
+  40% { width: 75%; }
+  100% { width: 92%; }
+}
+
 /* ── Landing page ─────────────────────────────────────────────── */
 
 .lb-landing :where(h1, h2, h3) { font-family: var(--font-display); }
