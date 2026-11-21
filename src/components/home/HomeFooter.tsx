@@ -30,7 +30,7 @@ export default function HomeFooter() {
             <div>
               <p className="text-xs font-black text-ink mb-2">Marketplace</p>
               {["Browse All", "Flash Sale", "New Arrivals", "Top Sellers"].map((l) => (
-                <Link key={l} href="/" className="block text-xs text-ink-faint hover:text-accent-hover py-0.5">
+                <Link key={l} href="/home" className="block text-xs text-ink-faint hover:text-accent-hover py-0.5">
                   {l}
                 </Link>
               ))}
@@ -61,8 +61,12 @@ export default function HomeFooter() {
           </div>
         </div>
 
-        <div className="border-t border-line pt-6 text-center">
+        <div className="border-t border-line pt-6 flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
           <p className="text-[11px] text-ink-faint">© 2026 Lumenbay. All rights reserved.</p>
+          <div className="flex gap-4 text-[11px]">
+            <Link href="/privacy" className="text-ink-faint hover:text-ink">Privacy</Link>
+            <Link href="/terms" className="text-ink-faint hover:text-ink">Terms</Link>
+          </div>
         </div>
       </div>
     </footer>

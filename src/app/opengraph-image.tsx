@@ -40,7 +40,6 @@ export default async function Image() {
               letterSpacing: "-0.04em",
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- ImageResponse renders plain img only */}
             <img src={iconSrc} alt="" width={72} height={72} />
             Lumenbay
           </div>

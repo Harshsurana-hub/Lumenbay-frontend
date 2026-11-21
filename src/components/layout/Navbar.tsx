@@ -7,6 +7,7 @@ import { Heart, User, Store } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import ThemeToggle from "./ThemeToggle";
+import { isStandalonePage } from "@/lib/standalonePages";
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -86,7 +87,7 @@ export default function Navbar() {
     }
   };
 
-  if (pathname.startsWith("/auth")) return null;
+  if (isStandalonePage(pathname)) return null;
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,9 +100,9 @@ export default function Navbar() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-surface border-b border-line flex items-center px-4 gap-3">
       {/* Wordmark */}
-      <Link href="/" className="flex items-center gap-1.5 shrink-0">
+      <Link href="/home" className="flex items-center gap-1.5 shrink-0">
         <Image src="/logo-icon.png" alt="" width={22} height={22} priority />
-        <span className="text-[15px] font-black text-ink tracking-tight">Lumenbay</span>
+        <span className="font-display text-[15px] font-extrabold text-ink tracking-tight">Lumenbay</span>
       </Link>
 
       {/* Search */}

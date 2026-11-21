@@ -4,7 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, type OAuthProvider } from "@/context/AuthContext";
+import AuthBrandPanel from "@/components/auth/AuthBrandPanel";
+import { GitHubIcon, GoogleIcon } from "@/components/auth/ProviderIcons";
 
 type FormErrors = { email?: string; password?: string; form?: string };
 
@@ -28,13 +30,24 @@ function signInErrorMessage(error: unknown): string {
   return message || "Something went wrong. Please try again.";
 }
 
+const PROVIDER_LABEL: Record<OAuthProvider, string> = { google: "Google", github: "GitHub" };
+
+function providerErrorMessage(provider: OAuthProvider, error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/not enabled|unsupported provider/i.test(message)) {
+    return `${PROVIDER_LABEL[provider]} sign-in isn't switched on yet. Use your email and password for now.`;
+  }
+  return signInErrorMessage(error);
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { signIn } = useAuth();
+  const { signIn, signInWithProvider } = useAuth();
 
   const prefillEmail = searchParams.get("email") ?? "";
   const justRegistered = searchParams.get("registered") === "1";
+  const oauthFailed = searchParams.get("error") === "oauth";
 
   /**
    * Where to go after signing in.
@@ -52,11 +65,25 @@ function LoginForm() {
   const returnUrl =
     rawReturnUrl.startsWith("/") && !rawReturnUrl.startsWith("//")
       ? rawReturnUrl
-      : "/dashboard/orders";
+      : "/home";
 
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
-  const [errors, setErrors] = useState<FormErrors>({});
+  const [errors, setErrors] = useState<FormErrors>(
+    oauthFailed ? { form: "That sign-in didn't complete. Please try again." } : {},
+  );
+  const [pendingProvider, setPendingProvider] = useState<OAuthProvider | null>(null);
+
+  const handleProvider = async (provider: OAuthProvider) => {
+    setErrors({});
+    setPendingProvider(provider);
+    try {
+      await signInWithProvider(provider, returnUrl);
+    } catch (err) {
+      setErrors({ form: providerErrorMessage(provider, err) });
+      setPendingProvider(null);
+    }
+  };
   const [touched, setTouched] = useState({ email: false, password: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -96,29 +123,37 @@ function LoginForm() {
     }`;
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left panel */}
-      <div className="hidden lg:flex w-[42%] bg-ink flex-col justify-between p-10">
-        <div className="flex items-center gap-1.5">
-          <Image src="/logo-icon.png" alt="" width={20} height={20} />
-          <span className="text-sm font-black text-white">Lumenbay</span>
-        </div>
-        <div>
-          <p className="text-3xl font-black text-white leading-tight tracking-tight mb-3">
-            &ldquo;Trade anything.<br />Risk nothing.&rdquo;
-          </p>
-          <p className="text-sm text-ink-faint leading-relaxed">
-            Every transaction on Lumenbay is secured by Stellar smart contract escrow. Your payment only releases when you confirm delivery.
-          </p>
-        </div>
-        <p className="text-xs text-ink-muted">&copy; 2026 Lumenbay</p>
-      </div>
+    <div className="relative min-h-screen flex">
+      <AuthBrandPanel
+        headline={
+          <>
+            Trade anything.
+            <br />
+            <span className="bg-linear-to-r from-[#FFD8CC] to-[#FFC4B0] bg-clip-text text-transparent">
+              Risk nothing.
+            </span>
+          </>
+        }
+        body="Every transaction on Lumenbay is secured by Stellar smart contract escrow. Your payment only releases when you confirm delivery."
+      />
 
-      {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center bg-surface p-6">
-        <div className="w-full max-w-sm">
+      <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-4 py-10 lg:w-1/2 lg:flex-none lg:bg-surface lg:p-6">
+        <div aria-hidden className="pointer-events-none absolute -top-32 -right-24 hidden h-80 w-80 rounded-full bg-[#FF6B5B] opacity-15 blur-3xl lg:block" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-32 -left-16 hidden h-72 w-72 rounded-full bg-[#FF9B7A] opacity-15 blur-3xl lg:block" />
+
+        <Link href="/" className="relative mb-6 flex items-center gap-2 lg:hidden">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-lg">
+            <Image src="/logo-icon.png" alt="" width={24} height={24} />
+          </span>
+          <span className="font-display text-lg font-extrabold tracking-tight text-white">Lumenbay</span>
+        </Link>
+
+        <div className="relative w-full max-w-sm rounded-3xl border border-white/20 bg-surface p-6 shadow-2xl shadow-orange-950/40 sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
           <div className="mb-7">
-            <h1 className="text-2xl font-black text-ink tracking-tight mb-1">Welcome back</h1>
+            <h1 className="font-display text-3xl font-extrabold text-ink tracking-tight mb-1">
+              Welcome back
+              <span className="ml-2 inline-block h-2.5 w-2.5 rounded-full bg-linear-to-br from-[#FF6B5B] to-[#FF9B7A] align-middle" aria-hidden />
+            </h1>
             <p className="text-sm text-ink-faint">Sign in to your Lumenbay account</p>
           </div>
 
@@ -191,7 +226,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+              className="w-full bg-linear-to-r from-[#E0483B] via-[#F05A47] to-[#FF7A59] hover:brightness-110 shadow-lg shadow-orange-500/25 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm"
             >
               {isSubmitting ? (
                 <>
@@ -214,13 +249,26 @@ function LoginForm() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-6">
-            {["Google", "GitHub"].map((p) => (
+            {(
+              [
+                { provider: "google", Icon: GoogleIcon },
+                { provider: "github", Icon: GitHubIcon },
+              ] as const
+            ).map(({ provider, Icon }) => (
               <button
-                key={p}
+                key={provider}
                 type="button"
-                className="flex items-center justify-center gap-1.5 border border-line rounded-lg py-2 text-xs font-semibold text-ink-muted hover:bg-surface-2 transition-colors"
+                onClick={() => handleProvider(provider)}
+                disabled={pendingProvider !== null || isSubmitting}
+                aria-busy={pendingProvider === provider}
+                className="flex items-center justify-center gap-2 border border-line rounded-xl py-2.5 text-sm font-semibold text-ink hover:bg-surface-2 hover:border-line-strong disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
-                {p}
+                {pendingProvider === provider ? (
+                  <span className="h-4 w-4 rounded-full border-2 border-line-strong border-t-accent animate-spin" aria-hidden />
+                ) : (
+                  <Icon className="h-4 w-4" />
+                )}
+                {PROVIDER_LABEL[provider]}
               </button>
             ))}
           </div>

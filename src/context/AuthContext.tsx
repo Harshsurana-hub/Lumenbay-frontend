@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase/env";
 
 export interface AuthUser {
   id: string;
@@ -25,9 +26,13 @@ interface AuthContextType {
   token: string | null;
   signUp: (input: SignUpInput) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Starts a provider sign-in; the browser leaves the page on success. */
+  signInWithProvider: (provider: OAuthProvider, returnUrl: string) => Promise<void>;
   signOut: () => Promise<void>;
   isLoading: boolean;
 }
+
+export type OAuthProvider = "google" | "github";
 
 export interface SignUpInput {
   email: string;
@@ -124,6 +129,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [supabase],
   );
 
+  const signInWithProvider = useCallback(
+    async (provider: OAuthProvider, returnUrl: string) => {
+      // signInWithOAuth only builds a redirect URL, so a provider that is
+      // switched off in Supabase surfaces as a raw JSON error page after the
+      // user has already left. Ask first and fail here instead.
+      const settings = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+        headers: { apikey: SUPABASE_PUBLISHABLE_KEY },
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+      if (settings && !settings.external?.[provider]) {
+        throw new Error(`Unsupported provider: ${provider} is not enabled`);
+      }
+
+      const callback = new URL("/auth/callback", window.location.origin);
+      callback.searchParams.set("next", returnUrl);
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo: callback.toString() },
+      });
+      if (error) throw error;
+    },
+    [supabase],
+  );
+
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -136,10 +167,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token: session?.access_token ?? null,
       signUp,
       signIn,
+      signInWithProvider,
       signOut,
       isLoading,
     }),
-    [session, signUp, signIn, signOut, isLoading],
+    [session, signUp, signIn, signInWithProvider, signOut, isLoading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
