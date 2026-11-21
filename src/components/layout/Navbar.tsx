@@ -7,6 +7,7 @@ import { Heart, User, Store } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import ThemeToggle from "./ThemeToggle";
+import NavWalletButton from "@/components/wallet/NavWalletButton";
 import { isStandalonePage } from "@/lib/standalonePages";
 
 export default function Navbar() {
@@ -132,6 +133,8 @@ export default function Navbar() {
           <span className="hidden sm:inline">{user ? "Sell an item" : "Sell on Lumenbay"}</span>
           <span className="sm:hidden">Sell</span>
         </Link>
+
+        {user && <NavWalletButton />}
 
         <ThemeToggle />
 
