@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Lock, ShieldCheck, Wallet, X } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { useWallet } from "@/context/WalletContext";
 import { createClient } from "@/lib/supabase/client";
 import { getSellerProfile } from "@/lib/listings";
+import { buildOrderTag } from "@/lib/orderTag";
+import { recordOrder } from "@/lib/orders/client";
 import type { Product } from "@/lib/products";
 import { STELLAR, explorerTx, isTestnet } from "@/lib/stellar/config";
 import { EscrowError, createEscrow, fundEscrow } from "@/lib/stellar/escrow";
@@ -19,9 +22,12 @@ type StepState = "idle" | "signing" | "done" | "error";
 
 export default function BuyWithEscrowDialog({ product, onClose }: { product: Product; onClose: () => void }) {
   const wallet = useWallet();
+  const { user } = useAuth();
   const [sellerAddress, setSellerAddress] = useState<string | null | undefined>(undefined);
   const [createState, setCreateState] = useState<StepState>("idle");
   const [fundState, setFundState] = useState<StepState>("idle");
+  const [saveState, setSaveState] = useState<StepState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [escrowId, setEscrowId] = useState<bigint | null>(null);
   const [hashes, setHashes] = useState<{ create?: string; fund?: string }>({});
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +51,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
   }, [busy, onClose]);
 
   const blocker = (() => {
+    if (!user) return "signed-out";
     if (!wallet.installed) return "install";
     if (!wallet.address) return "connect";
     if (!wallet.networkOk) return "network";
@@ -70,7 +77,20 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
     setError(err.message);
   };
 
-  const lockFunds = async (id: bigint) => {
+  /** Tells the server, which checks the chain and saves the order for buyer and seller. */
+  const saveOrder = async (id: bigint, createTxHash?: string, fundTxHash?: string) => {
+    setSaveState("signing");
+    setSaveError(null);
+    try {
+      await recordOrder(id, { createTxHash, fundTxHash });
+      setSaveState("done");
+    } catch (e) {
+      setSaveState("error");
+      setSaveError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const lockFunds = async (id: bigint, createTxHash?: string) => {
     setFundState("signing");
     try {
       const { hash } = await fundEscrow(wallet.address!, id);
@@ -78,6 +98,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
       recordPaymentEvent({ ...journalBase(), step: "escrow_funded", escrowId: id.toString(), txHash: hash });
       setFundState("done");
       void wallet.refresh();
+      await saveOrder(id, createTxHash ?? hashes.create, hash);
     } catch (e) {
       setFundState("error");
       fail("fund", e, id);
@@ -94,13 +115,13 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
         buyer: wallet.address!,
         seller: sellerAddress!,
         amountXlm: price,
-        tag: `lumenbay:${product.id}:${crypto.randomUUID()}`,
+        tag: buildOrderTag(product.id, user!.id),
       });
       setEscrowId(id);
       setHashes({ create: hash });
       recordPaymentEvent({ ...journalBase(), step: "escrow_created", escrowId: id.toString(), txHash: hash });
       setCreateState("done");
-      await lockFunds(id);
+      await lockFunds(id, hash);
     } catch (e) {
       setCreateState("error");
       fail("create", e);
@@ -144,7 +165,26 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
               <ol className="flex flex-col gap-2">
                 <Step n={1} title="Create the escrow" body="Records the deal on-chain. No money moves yet." state={createState} hash={hashes.create} />
                 <Step n={2} title="Lock your payment" body="Moves the XLM into the contract until you confirm delivery." state={fundState} hash={hashes.fund} />
+                <Step
+                  n={3}
+                  title="Save your order"
+                  body="Lumenbay checks the payment on-chain and tells the seller. No signature needed."
+                  busyText="Checking the payment on-chain…"
+                  state={saveState}
+                />
               </ol>
+
+              {saveState === "error" && escrowId !== null && (
+                <div role="alert" className="flex flex-col gap-2 rounded-xl border border-warn-line bg-warn-bg p-3 text-xs text-warn">
+                  <p className="flex gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>Your payment is locked and safe, but we couldn&apos;t save the order yet: {saveError}</span>
+                  </p>
+                  <button onClick={() => saveOrder(escrowId, hashes.create, hashes.fund)} className="self-start rounded-lg bg-warn px-3 py-1.5 font-bold text-white">
+                    Try saving again
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -160,7 +200,8 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
               href={`/dashboard/escrow/${escrowId}`}
               className="flex items-center justify-center gap-2 rounded-xl bg-accent py-3.5 text-sm font-bold text-on-accent hover:bg-accent-hover"
             >
-              <CheckCircle2 className="h-4 w-4" /> Payment locked · View order
+              {saveState === "signing" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {saveState === "done" ? "Order placed · View order" : "Payment locked · View order"}
             </Link>
           ) : (
             !blocker && (
@@ -187,6 +228,13 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
     const box = "flex flex-col gap-3 rounded-2xl border border-line bg-surface-2 p-4 text-sm text-ink-muted";
     const btn = "inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-bold text-on-accent hover:bg-accent-hover disabled:opacity-60";
     switch (kind) {
+      case "signed-out":
+        return (
+          <div className={box}>
+            <p>Sign in to buy, so the order is saved to your account and the seller can see it.</p>
+            <Link href="/auth/login" className={btn}>Sign in</Link>
+          </div>
+        );
       case "install":
         return (
           <div className={box}>
@@ -234,7 +282,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
   }
 }
 
-function Step({ n, title, body, state, hash }: { n: number; title: string; body: string; state: StepState; hash?: string }) {
+function Step({ n, title, body, state, hash, busyText = "Approve in your wallet…" }: { n: number; title: string; body: string; state: StepState; hash?: string; busyText?: string }) {
   return (
     <li className={`flex items-start gap-3 rounded-xl border p-3 ${state === "done" ? "border-ok-line bg-ok-bg" : state === "error" ? "border-bad-line" : "border-line"}`}>
       <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-black text-ink">
@@ -242,7 +290,7 @@ function Step({ n, title, body, state, hash }: { n: number; title: string; body:
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-ink">{title}</p>
-        <p className="text-xs text-ink-muted">{state === "signing" ? "Approve in your wallet…" : body}</p>
+        <p className="text-xs text-ink-muted">{state === "signing" ? busyText : body}</p>
         {hash && (
           <a href={explorerTx(hash)} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 font-mono text-[11px] text-accent">
             {hash.slice(0, 10)}…{hash.slice(-6)} <ExternalLink className="h-3 w-3" />

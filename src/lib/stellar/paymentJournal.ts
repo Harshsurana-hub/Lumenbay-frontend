@@ -84,7 +84,37 @@ export function recordPaymentEvent(event: Omit<PaymentEvent, "id" | "at">): Paym
   }
   const log = event.step === "step_failed" ? console.error : console.info;
   log("[lumenbay:payment]", full);
+  void persist(full);
   return full;
+}
+
+/**
+ * Copies the event to the `payment_events` audit table, so failures are
+ * visible to us and not only in this browser. Best effort: a failed write
+ * must never break a payment flow.
+ */
+async function persist(e: PaymentEvent) {
+  try {
+    const { createClient } = await import("@/lib/supabase/client");
+    const { error } = await createClient().from("payment_events").insert({
+      step: e.step,
+      failed_action: e.failedAction ?? null,
+      network: e.network,
+      contract_id: e.contractId,
+      chain_escrow_id: e.escrowId ?? null,
+      product_id: e.productId ?? null,
+      buyer_address: e.buyer ?? null,
+      seller_address: e.seller ?? null,
+      amount_xlm: e.amountXlm ?? null,
+      tx_hash: e.txHash ?? null,
+      error_code: e.errorCode ?? null,
+      error_message: e.errorMessage?.slice(0, 1000) ?? null,
+      client_at: e.at,
+    });
+    if (error) console.warn("[lumenbay:payment] audit write failed", error.message);
+  } catch (err) {
+    console.warn("[lumenbay:payment] audit write failed", err);
+  }
 }
 
 /** All recorded events for one escrow, oldest first. */

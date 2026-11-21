@@ -15,9 +15,15 @@ import {
   ShieldCheck,
   ShoppingBag,
   Store,
+  Truck,
   Wallet,
 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { useWallet } from "@/context/WalletContext";
+import { parseOrderTag } from "@/lib/orderTag";
+import { markOrderShipped, recordOrder, syncOrder } from "@/lib/orders/client";
+import { getOrderByChainId, type OrderSummary } from "@/lib/orders/queries";
+import { createClient } from "@/lib/supabase/client";
 import { STELLAR, explorerAccount, explorerContract, explorerTx } from "@/lib/stellar/config";
 import {
   EscrowError,
@@ -32,7 +38,7 @@ import {
 import { eventsForEscrow, recordPaymentEvent, type PaymentEvent } from "@/lib/stellar/paymentJournal";
 import { formatAddress } from "@/lib/utils";
 
-const TRACK = ["Pending", "Funded", "Released"] as const;
+const TRACK = ["Created", "Funds locked", "Shipped", "Released"] as const;
 
 const STATUS_COPY: Record<string, { label: string; body: string; tone: string }> = {
   Pending: { label: "Awaiting payment", body: "The escrow exists but no funds are locked yet.", tone: "text-warn" },
@@ -54,15 +60,28 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const escrowId = /^\d+$/.test(id) ? BigInt(id) : null;
   const wallet = useWallet();
+  const { user } = useAuth();
 
   const [escrow, setEscrow] = useState<OnChainEscrow | null | undefined>(undefined);
+  const [order, setOrder] = useState<OrderSummary | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [journal, setJournal] = useState<PaymentEvent[]>([]);
-  const [busy, setBusy] = useState<null | "fund" | "release" | "dispute">(null);
+  const [busy, setBusy] = useState<null | "fund" | "release" | "dispute" | "ship" | "save">(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [reason, setReason] = useState<RefundReason>("ProductNotReceived");
   const [note, setNote] = useState("");
+  const [shipNote, setShipNote] = useState("");
+
+  const loadOrder = useCallback(async () => {
+    if (escrowId === null || !user) return setOrder(null);
+    try {
+      setOrder(await getOrderByChainId(createClient(), user.id, escrowId.toString()));
+    } catch (e) {
+      console.error("[lumenbay:orders] load order failed", e);
+      setOrder(null);
+    }
+  }, [escrowId, user]);
 
   const load = useCallback(async () => {
     if (escrowId === null) return;
@@ -73,16 +92,29 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
       setLoadError(e instanceof Error ? e.message : "Couldn't read this escrow from the network.");
     }
     setJournal(eventsForEscrow(escrowId.toString()));
-  }, [escrowId]);
+    await loadOrder();
+  }, [escrowId, loadOrder]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // Opening the page is a good moment to catch up with anything that happened on-chain.
+  const orderKnown = !!order;
+  useEffect(() => {
+    if (escrowId === null || !orderKnown) return;
+    syncOrder(escrowId)
+      .then(() => loadOrder())
+      .catch(() => {}); // the chain read above is still shown; sync is a background tidy-up
+  }, [escrowId, orderKnown, loadOrder]);
+
   if (escrowId === null) return <Shell><p className="text-ink-muted">That isn&apos;t a valid escrow number.</p></Shell>;
 
-  const isBuyer = !!escrow && wallet.address === escrow.buyer;
-  const isSeller = !!escrow && wallet.address === escrow.seller;
+  // The account decides the role when the order is saved; otherwise fall back to the wallet.
+  const isBuyer = order ? order.role === "buyer" : !!escrow && wallet.address === escrow.buyer;
+  const isSeller = order ? order.role === "seller" : !!escrow && wallet.address === escrow.seller;
+  const walletIsBuyer = !!escrow && wallet.address === escrow.buyer;
+  const shipped = order?.state === "in_transit" || !!order?.shippedAt;
   const amountXlm = escrow ? stroopsToXlm(escrow.amount) : 0;
   const copy = escrow ? STATUS_COPY[escrow.status] ?? STATUS_COPY.Pending : null;
 
@@ -102,12 +134,15 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
       if (action === "fund") {
         const { hash } = await fundEscrow(wallet.address, escrow.id);
         recordPaymentEvent({ ...base, step: "escrow_funded", txHash: hash });
+        await recordOrder(escrow.id, { fundTxHash: hash }).catch((e) => setActionError(`Payment locked, but the order isn't saved yet: ${e.message}`));
       } else if (action === "release") {
         const { hash } = await releaseEscrow(wallet.address, escrow.id);
         recordPaymentEvent({ ...base, step: "escrow_released", txHash: hash });
+        if (order) await syncOrder(escrow.id, hash).catch(() => {});
       } else {
         const { hash } = await openDispute({ buyer: wallet.address, escrowId: escrow.id, amountStroops: escrow.amount, reason, note });
         recordPaymentEvent({ ...base, step: "dispute_opened", txHash: hash });
+        if (order) await syncOrder(escrow.id).catch(() => {});
         setDisputeOpen(false);
       }
       await load();
@@ -122,11 +157,29 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
+  /** Server-side actions: no wallet signature, the server checks the chain. */
+  const serverAction = async (action: "ship" | "save") => {
+    if (!escrow) return;
+    setBusy(action);
+    setActionError(null);
+    try {
+      if (action === "ship") await markOrderShipped(escrow.id, shipNote);
+      else await recordOrder(escrow.id, {});
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const holding = escrow?.status === "Funded";
+
   return (
     <Shell>
       <div className="flex items-center justify-between">
-        <Link href="/dashboard/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-accent">
-          <ArrowLeft className="h-3.5 w-3.5" /> Orders
+        <Link href={isSeller ? "/dashboard/selling" : "/dashboard/buying"} className="inline-flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-accent">
+          <ArrowLeft className="h-3.5 w-3.5" /> {isSeller ? "Seller hub" : "My purchases"}
         </Link>
         <button onClick={() => load()} className="inline-flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-accent">
           <RefreshCw className="h-3.5 w-3.5" /> Refresh from chain
@@ -135,7 +188,10 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
 
       <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-ink-faint">Escrow #{id}</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-ink-faint">
+            Escrow #{id}
+            {order && <> · <Link href={`/product/${order.productId}`} className="normal-case tracking-normal text-ink-muted hover:text-accent">{order.productName}</Link></>}
+          </p>
           <h1 className="font-display mt-1 text-3xl font-extrabold tracking-tight text-ink">
             {escrow ? `${amountXlm.toLocaleString()} XLM` : "Loading…"}
           </h1>
@@ -143,15 +199,37 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
         {copy && <span className={`rounded-full bg-surface-2 px-3 py-1 text-sm font-bold ${copy.tone}`}>{copy.label}</span>}
       </header>
 
-      {escrow && <RoleBanner role={isBuyer ? "buyer" : isSeller ? "seller" : wallet.address ? "outsider" : "unknown"} status={escrow.status} />}
+      {escrow && (
+        <RoleBanner
+          role={isBuyer ? "buyer" : isSeller ? "seller" : wallet.address ? "outsider" : "unknown"}
+          status={escrow.status === "Funded" && shipped ? "Shipped" : escrow.status}
+          counterparty={order?.counterparty}
+        />
+      )}
 
       {loadError && <Alert>{loadError}</Alert>}
       {escrow === null && <Alert>No escrow #{id} exists on {STELLAR.network}.</Alert>}
 
       {escrow && copy && (
         <>
-          <Track status={escrow.status} />
+          <Track status={escrow.status} shipped={shipped} />
           <p className="mt-4 text-sm text-ink-muted">{copy.body}</p>
+
+          {order?.shippedAt && (
+            <div className="mt-4 flex items-start gap-3 rounded-2xl border border-line bg-surface p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-accent">
+                <Truck className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-ink">Shipped {new Date(order.shippedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</p>
+                {order.shippingNote ? (
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-ink-muted">{order.shippingNote}</p>
+                ) : (
+                  <p className="mt-0.5 text-xs text-ink-faint">No tracking details were added.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           <dl className="mt-6 grid grid-cols-1 gap-3 rounded-2xl border border-line bg-surface p-5 text-sm sm:grid-cols-2">
             <Field label="Buyer" value={escrow.buyer} href={explorerAccount(escrow.buyer)} you={isBuyer} />
@@ -165,19 +243,58 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
 
           {/* Actions */}
           <section className="mt-6 flex flex-col gap-3">
-            {!wallet.address && (escrow.status === "Pending" || escrow.status === "Funded") && (
+            {isSeller && order && holding && !shipped && (
+              <div className="flex flex-col gap-3 rounded-2xl border border-accent-line bg-accent-soft p-4">
+                <p className="flex items-center gap-2 text-sm font-black text-ink"><Truck className="h-4 w-4 text-accent" /> Ready to ship</p>
+                <p className="text-xs text-ink-muted">
+                  The buyer&apos;s {amountXlm.toLocaleString()} XLM is locked. Send the item, then mark it shipped so they know it&apos;s coming. No wallet signature needed.
+                </p>
+                <textarea
+                  value={shipNote}
+                  onChange={(e) => setShipNote(e.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="Optional: courier and tracking number, or how it's being delivered"
+                  className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
+                />
+                <ActionButton onClick={() => serverAction("ship")} busy={busy === "ship"} busyText="Saving…" icon={<Truck className="h-4 w-4" />}>
+                  Mark as shipped
+                </ActionButton>
+              </div>
+            )}
+
+            {isSeller && !order && order !== undefined && holding && (
+              <p className="rounded-2xl border border-line bg-surface-2 p-4 text-xs text-ink-muted">
+                This payment isn&apos;t linked to a Lumenbay order yet, so shipping can&apos;t be tracked here. It still pays out to you when the buyer confirms delivery.
+              </p>
+            )}
+
+            {walletIsBuyer && user && order === null && escrow.status !== "Pending" && escrow.status !== "Cancelled" &&
+              parseOrderTag(escrow.metadata)?.buyerUserId === user.id && (
+              <ActionButton onClick={() => serverAction("save")} busy={busy === "save"} busyText="Checking on-chain…" icon={<ShieldCheck className="h-4 w-4" />}>
+                Save this order to my account
+              </ActionButton>
+            )}
+
+            {isBuyer && wallet.address && !walletIsBuyer && (escrow.status === "Pending" || escrow.status === "Funded") && (
+              <p className="rounded-2xl border border-warn-line bg-warn-bg p-4 text-xs text-warn">
+                You paid for this order from the wallet ending <strong className="font-mono">{escrow.buyer.slice(-6)}</strong>. Switch to that account in your wallet to release payment or open a dispute.
+              </p>
+            )}
+
+            {!wallet.address && !isSeller && (escrow.status === "Pending" || escrow.status === "Funded") && (
               <button onClick={() => wallet.connect()} className="inline-flex items-center justify-center gap-2 rounded-xl border border-line bg-surface py-3 text-sm font-bold text-ink hover:border-accent">
                 <Wallet className="h-4 w-4" /> Connect the buyer&apos;s wallet to take action
               </button>
             )}
 
-            {isBuyer && escrow.status === "Pending" && (
+            {walletIsBuyer && escrow.status === "Pending" && (
               <ActionButton onClick={() => run("fund")} busy={busy === "fund"} icon={<Lock className="h-4 w-4" />}>
                 Finish payment: lock {amountXlm.toLocaleString()} XLM
               </ActionButton>
             )}
 
-            {isBuyer && escrow.status === "Funded" && !disputeOpen && (
+            {walletIsBuyer && escrow.status === "Funded" && !disputeOpen && (
               <>
                 <ActionButton onClick={() => run("release")} busy={busy === "release"} icon={<PackageCheck className="h-4 w-4" />}>
                   I received it: release payment to seller
@@ -188,7 +305,7 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
               </>
             )}
 
-            {isBuyer && escrow.status === "Funded" && disputeOpen && (
+            {walletIsBuyer && escrow.status === "Funded" && disputeOpen && (
               <div className="flex flex-col gap-3 rounded-2xl border border-bad-line bg-bad-bg/40 p-4">
                 <p className="text-sm font-bold text-ink">Open a dispute</p>
                 <p className="text-xs text-ink-muted">Funds stay locked until it&apos;s resolved. Only a fingerprint of your note is stored on-chain, not the text.</p>
@@ -224,6 +341,7 @@ const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
   buyer: {
     Pending: "Your payment isn't locked yet. Finish payment to start the escrow.",
     Funded: "Your money is locked in the contract. Release it once the item arrives, or open a dispute if something is wrong.",
+    Shipped: "The seller has shipped your item. Once it arrives, release the payment. If something's wrong, open a dispute instead.",
     Released: "You confirmed delivery and the seller has been paid.",
     Disputed: "You opened a dispute. Your money stays locked until it's resolved.",
     Refunded: "The dispute was resolved and your money was refunded.",
@@ -231,7 +349,8 @@ const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
   },
   seller: {
     Pending: "The buyer hasn't locked their payment yet. Don't ship until it shows as funded.",
-    Funded: "The buyer's payment is locked. Ship the item; you're paid automatically when they confirm delivery.",
+    Funded: "The buyer's payment is locked. Ship the item and mark it shipped; you're paid automatically when they confirm delivery.",
+    Shipped: "You've marked this shipped. You're paid automatically when the buyer confirms delivery.",
     Released: "The buyer confirmed delivery and you've been paid.",
     Disputed: "The buyer opened a dispute. The payment stays locked until it's resolved.",
     Refunded: "The dispute was resolved in the buyer's favour.",
@@ -240,7 +359,7 @@ const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
 };
 
 /** Says plainly which side of this escrow the connected wallet is on. */
-function RoleBanner({ role, status }: { role: "buyer" | "seller" | "outsider" | "unknown"; status: string }) {
+function RoleBanner({ role, status, counterparty }: { role: "buyer" | "seller" | "outsider" | "unknown"; status: string; counterparty?: string }) {
   if (role === "buyer" || role === "seller") {
     const Icon = role === "buyer" ? ShoppingBag : Store;
     return (
@@ -249,7 +368,10 @@ function RoleBanner({ role, status }: { role: "buyer" | "seller" | "outsider" | 
           <Icon className="h-4 w-4" />
         </span>
         <div>
-          <p className="text-sm font-black text-ink">You&apos;re the {role} in this order</p>
+          <p className="text-sm font-black text-ink">
+            You&apos;re the {role} in this order
+            {counterparty && <span className="font-semibold text-ink-muted"> · {role === "buyer" ? "sold by" : "bought by"} {counterparty}</span>}
+          </p>
           <p className="text-xs text-ink-muted">{ROLE_COPY[role][status] ?? ""}</p>
         </div>
       </div>
@@ -281,19 +403,18 @@ function Alert({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Track({ status }: { status: string }) {
-  const index = TRACK.indexOf(status as (typeof TRACK)[number]);
-  const off = index === -1;
+function Track({ status, shipped }: { status: string; shipped: boolean }) {
+  // Disputed / refunded / cancelled sit off the happy path, so nothing lights up.
+  const index =
+    status === "Pending" ? 0 : status === "Funded" ? (shipped ? 2 : 1) : status === "Released" ? 3 : -1;
   return (
-    <ol className="mt-6 grid grid-cols-3 gap-2">
+    <ol className="mt-6 grid grid-cols-4 gap-2">
       {TRACK.map((s, i) => {
-        const reached = !off && i <= index;
+        const reached = index !== -1 && i <= index;
         return (
           <li key={s} className="flex flex-col gap-2">
             <span className={`h-1.5 rounded-full ${reached ? "bg-accent" : "bg-surface-3"}`} />
-            <span className={`text-xs font-semibold ${reached ? "text-ink" : "text-ink-faint"}`}>
-              {s === "Pending" ? "Created" : s === "Funded" ? "Funds locked" : "Released"}
-            </span>
+            <span className={`text-xs font-semibold ${reached ? "text-ink" : "text-ink-faint"}`}>{s}</span>
           </li>
         );
       })}
@@ -320,6 +441,7 @@ function ActionButton({
   disabled,
   icon,
   tone = "accent",
+  busyText = "Approve in your wallet…",
   children,
 }: {
   onClick: () => void;
@@ -327,6 +449,7 @@ function ActionButton({
   disabled?: boolean;
   icon: React.ReactNode;
   tone?: "accent" | "bad";
+  busyText?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -338,7 +461,7 @@ function ActionButton({
       }`}
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
-      {busy ? "Approve in your wallet…" : children}
+      {busy ? busyText : children}
     </button>
   );
 }

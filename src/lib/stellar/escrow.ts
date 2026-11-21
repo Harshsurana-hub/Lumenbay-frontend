@@ -1,5 +1,6 @@
 import { Buffer } from "buffer";
 import { contract, rpc } from "@stellar/stellar-sdk";
+import { readEscrow, type OnChainEscrow } from "./chain";
 import { STELLAR } from "./config";
 import { signWithFreighter } from "./freighter";
 
@@ -14,16 +15,7 @@ export function stroopsToXlm(stroops: bigint | number | string): number {
   return Number(BigInt(stroops)) / Number(STROOPS_PER_XLM);
 }
 
-export type OnChainStatus = "Pending" | "Funded" | "Released" | "Refunded" | "Disputed" | "Cancelled";
-
-export interface OnChainEscrow {
-  id: bigint;
-  buyer: string;
-  seller: string;
-  token: string;
-  amount: bigint;
-  status: OnChainStatus;
-}
+export type { OnChainEscrow, OnChainStatus } from "./chain";
 
 export type RefundReason = "ProductNotReceived" | "ProductDefective" | "WrongProduct" | "ChangedMind" | "Other";
 
@@ -160,20 +152,7 @@ export async function openDispute(params: { buyer: string; escrowId: bigint; amo
 /** Reads an escrow straight from the contract. Free: simulated, never submitted. */
 export async function getEscrow(escrowId: bigint): Promise<OnChainEscrow | null> {
   try {
-    const client = (await escrowClient()) as unknown as MethodClient;
-    const tx = await client.get_escrow({ escrow_id: escrowId });
-    assertSimulationOk(tx);
-    const raw = unwrap<Record<string, unknown> | undefined>(tx.result);
-    if (!raw) return null;
-    const status = raw.status as { tag?: string } | string;
-    return {
-      id: escrowId,
-      buyer: String(raw.buyer),
-      seller: String(raw.seller),
-      token: String(raw.token),
-      amount: BigInt(raw.amount as bigint),
-      status: (typeof status === "string" ? status : status.tag) as OnChainStatus,
-    };
+    return await readEscrow(escrowId);
   } catch (e) {
     throw toEscrowError(e);
   }
