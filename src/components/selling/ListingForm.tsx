@@ -277,14 +277,15 @@ export default function ListingForm() {
           </div>
 
           <p className="rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
-            Buyers pay in USDC on Stellar. {usdPrice > 0 ? (
+            Buyers pay in XLM on Stellar.{" "}
+            {usdPrice > 0 ? (
               <>
-                {formatUsd(usdPrice)} is about <span className="tnum font-medium text-ink">{formatXlm(usdToXlm(usdPrice))}</span> at today&apos;s rate, shown for reference only —
+                {formatUsd(usdPrice)} is about <span className="tnum font-medium text-ink">{formatXlm(usdToXlm(usdPrice))}</span> at today&apos;s rate.
               </>
             ) : (
-              <>The XLM figure shown on your listing is for reference only —</>
+              <>Your dollar price is converted to XLM at today&apos;s rate.</>
             )}{" "}
-            settlement is always in dollars, so a price move during delivery does not change what you receive.
+            That XLM amount is what&apos;s locked in escrow and what you receive (minus the 1% fee), so its dollar value can move with the XLM price.
           </p>
         </Section>
 
