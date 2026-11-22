@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  ArrowRight,
   ChevronDown,
+  FlaskConical,
   Search,
   HelpCircle,
   Shield,
@@ -32,7 +35,7 @@ const faqs: FAQItem[] = [
     category: "Getting Started",
     question: "How do I connect my wallet?",
     answer:
-      "Install the Freighter Wallet browser extension, then click the 'Connect Wallet' button in the top navigation. Approve the connection request in Freighter, and you'll be ready to start trading.",
+      "Install the Freighter wallet browser extension, switch it to Testnet, then click the 'Connect wallet' button in the top bar (or on your Wallet page). Approve the request in Freighter. The Testnet guide at /help/testnet walks through every step.",
   },
   {
     id: "3",
@@ -67,7 +70,7 @@ const faqs: FAQItem[] = [
     category: "Payments",
     question: "Are there any fees?",
     answer:
-      "Lumenbay charges a small platform fee (typically 1-2%) on completed transactions. Additionally, standard Stellar network fees apply (usually less than 0.00001 XLM per transaction).",
+      "Lumenbay charges a 1% platform fee on completed orders, paid by the seller when the payment is released. Buyers pay exactly the listed price, plus Stellar network fees of under 0.01 XLM per step.",
   },
   {
     id: "8",
@@ -145,6 +148,29 @@ export default function HelpPage() {
             Find answers to common questions about Lumenbay
           </p>
         </div>
+
+        {/* Testnet guide */}
+        <Link
+          href="/help/testnet"
+          className="lb-vault lb-grain group relative mb-8 flex flex-col gap-4 overflow-hidden rounded-3xl p-6 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div aria-hidden className="lb-edge-glow absolute inset-x-0 top-0 h-px" />
+          <div className="relative flex items-start gap-4">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-linear-to-br from-[#E0483B] to-[#FF7A59] text-white">
+              <FlaskConical className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FFB4A2]">New here? Start with this</p>
+              <p className="font-display mt-1 text-xl font-bold text-white">Getting started on testnet</p>
+              <p className="mt-1 text-sm text-white/65">
+                Set up Freighter, get free test XLM, then buy and sell with escrow. Step by step, in plain English.
+              </p>
+            </div>
+          </div>
+          <span className="relative inline-flex shrink-0 items-center gap-1.5 self-start rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-white transition group-hover:bg-white/20 sm:self-auto">
+            Read the guide <ArrowRight className="h-4 w-4" aria-hidden />
+          </span>
+        </Link>
 
         {/* Search */}
         <div className="mb-6">
