@@ -37,6 +37,7 @@ import {
   type PayoutState,
   type TimelineEntry,
 } from "./disputes";
+import { queryRows, summarize, type DisputePage, type DisputeQuery, type DisputeRow, type QueueSummary, type RowStatus } from "./disputeQuery";
 
 /**
  * Server side of dispute resolution. Who is an admin is read from
@@ -100,21 +101,8 @@ export interface DisputeSummary {
   reason: string | null;
 }
 
-export interface ResolvedSummary {
-  chainEscrowId: string;
-  outcome: DisputeOutcome;
-  productName: string;
-  amountStroops: string;
-  adminName: string;
-  createdAt: string;
-  txHash: string;
-}
-
-export interface DisputeList {
-  open: DisputeSummary[];
-  /** Resolved on-chain but not recorded with a note yet (e.g. settled from the CLI). */
-  unrecorded: DisputeSummary[];
-  resolved: ResolvedSummary[];
+export interface DisputeQueue extends DisputePage {
+  summary: QueueSummary;
   syncedAt: string;
   chainError: string | null;
 }
@@ -155,18 +143,21 @@ interface DbDisputeRow extends EscrowRow {
   dispute_note: string | null;
   disputed_at: string | null;
   created_at: string;
-  orders: { product_id: string } | { product_id: string }[] | null;
+  resolution: DisputeOutcome | null;
+  resolved_at: string | null;
+  orders: One<{ product_id: string; products: One<{ product_images: { url: string; position: number }[] | null }> }>;
   buyer: { display_name: string | null } | { display_name: string | null }[] | null;
   seller: { display_name: string | null } | { display_name: string | null }[] | null;
 }
 
-const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
+type One<T> = T | T[] | null;
+const one = <T,>(v: One<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v);
 
 const DISPUTE_COLUMNS = `
   id, order_id, buyer_id, seller_id, asset_name, price_xlm, current_state, chain_escrow_id,
   buyer_address, seller_address, amount_stroops, shipped_at, shipping_note,
-  dispute_reason, dispute_note, disputed_at, created_at,
-  orders ( product_id ),
+  dispute_reason, dispute_note, disputed_at, created_at, resolution, resolved_at,
+  orders ( product_id, products ( product_images ( url, position ) ) ),
   buyer:profiles!escrows_buyer_id_fkey ( display_name ),
   seller:profiles!escrows_seller_id_fkey ( display_name )
 `;
@@ -228,22 +219,60 @@ async function summaryFromChain(admin: Admin, chain: OnChainEscrow, names: Map<s
 }
 
 // ---------------------------------------------------------------------------
-// List
+// Queue
 // ---------------------------------------------------------------------------
 
+/** One contract scan is shared by requests for a short while; "Sync with chain" forces a fresh one. */
+const SCAN_TTL_MS = 30_000;
+let scanCache: { at: number; escrows: OnChainEscrow[] } | null = null;
+
+async function scanChain(force: boolean): Promise<{ escrows: OnChainEscrow[]; fresh: boolean }> {
+  if (!force && scanCache && Date.now() - scanCache.at < SCAN_TTL_MS) return { escrows: scanCache.escrows, fresh: false };
+  const escrows = await readAllEscrows();
+  scanCache = { at: Date.now(), escrows };
+  return { escrows, fresh: true };
+}
+
+function firstImage(row: DbDisputeRow): string | null {
+  const images = one(one(row.orders)?.products ?? null)?.product_images ?? [];
+  return [...images].sort((a, b) => a.position - b.position)[0]?.url ?? null;
+}
+
+function rowFromDb(row: DbDisputeRow, chain: OnChainEscrow | null, status: RowStatus): DisputeRow {
+  const s = summaryFromRow(row, chain);
+  return {
+    chainEscrowId: s.chainEscrowId,
+    status,
+    recorded: true,
+    productName: s.productName,
+    image: firstImage(row),
+    buyerName: s.buyerName,
+    sellerName: s.sellerName,
+    amountStroops: s.amountStroops,
+    reason: s.reason,
+    openedAt: s.openedAt,
+    shippedAt: s.shippedAt,
+    outcome: row.resolution,
+    resolvedAt: row.resolved_at,
+    adminName: null,
+    note: null,
+    txHash: null,
+  };
+}
+
 /**
- * Every open dispute. Reads the database, then scans the contract: rows the
- * chain has moved on are synced first (a dispute opened while nobody had the
- * order page open, or settled from the CLI), and disputed escrows that were
- * never recorded as orders are listed too.
+ * Every dispute as queue rows: open ones (recorded and chain-only), rulings
+ * made outside the app that still need a note, and resolved ones. Rows the
+ * chain has moved on are synced first.
  */
-export async function listDisputes(): Promise<DisputeList> {
+async function collectRows(force: boolean): Promise<{ rows: DisputeRow[]; chainError: string | null }> {
   const admin = createAdminClient();
 
   let chainEscrows: OnChainEscrow[] = [];
   let chainError: string | null = null;
+  let fresh = false;
   try {
-    chainEscrows = await readAllEscrows();
+    ({ escrows: chainEscrows, fresh } = await scanChain(force));
   } catch (e) {
     console.error("[lumenbay:admin] chain scan failed", e);
     chainError = "Couldn't scan the contract right now; showing what the database knows.";
@@ -251,79 +280,95 @@ export async function listDisputes(): Promise<DisputeList> {
   const byId = new Map(chainEscrows.map((e) => [e.id.toString(), e]));
 
   // Sync recorded escrows whose chain status says they're in or past a dispute.
-  const interesting = chainEscrows.filter((e) => e.status === "Disputed" || e.status === "Refunded" || e.status === "Released");
+  const interesting = fresh ? chainEscrows.filter((e) => e.status === "Disputed" || e.status === "Refunded" || e.status === "Released") : [];
   if (interesting.length) {
-    const { data: rows, error } = await admin
+    const { data, error } = await admin
       .from("escrows")
       .select("id, order_id, buyer_id, seller_id, asset_name, price_xlm, current_state, chain_escrow_id")
       .eq("contract_id", STELLAR.escrowContractId)
       .in("chain_escrow_id", interesting.map((e) => e.id.toString()));
     if (error) throw dbError("load escrows to sync", error);
-    for (const row of (rows ?? []) as EscrowRow[]) {
+    for (const row of (data ?? []) as EscrowRow[]) {
       const chain = byId.get(String(row.chain_escrow_id));
-      if (!chain) continue;
-      await applyChainState(admin, row, chain).catch((e) => console.error("[lumenbay:admin] sync failed", { id: row.chain_escrow_id, e: String(e) }));
+      if (chain) await applyChainState(admin, row, chain).catch((e) => console.error("[lumenbay:admin] sync failed", { id: row.chain_escrow_id, e: String(e) }));
     }
   }
 
-  const { data: disputed, error } = await admin
+  // Open disputes, and rulings (resolution set) — the resolved ones are joined to their write-up below.
+  const { data: dbRows, error } = await admin
     .from("escrows")
     .select(DISPUTE_COLUMNS)
     .eq("contract_id", STELLAR.escrowContractId)
-    .eq("current_state", "disputed")
-    .order("disputed_at", { ascending: true, nullsFirst: true });
+    .or("current_state.eq.disputed,resolution.not.is.null")
+    .limit(5000);
   if (error) throw dbError("load disputes", error);
-  const open = ((disputed ?? []) as unknown as DbDisputeRow[]).map((r) => summaryFromRow(r, byId.get(String(r.chain_escrow_id)) ?? null));
+  const recorded = (dbRows ?? []) as unknown as DbDisputeRow[];
+  const recordedById = new Map(recorded.map((r) => [String(r.chain_escrow_id), r]));
 
   const { data: resolutions, error: resError } = await admin
     .from("dispute_resolutions")
-    .select("chain_escrow_id, outcome, amount_stroops, tx_hash, created_at, escrows ( asset_name ), admin:profiles!dispute_resolutions_admin_id_fkey ( display_name )")
+    .select("chain_escrow_id, outcome, amount_stroops, note, tx_hash, created_at, admin:profiles!dispute_resolutions_admin_id_fkey ( display_name )")
     .eq("contract_id", STELLAR.escrowContractId)
     .order("created_at", { ascending: false })
-    .limit(50);
+    .limit(5000);
   if (resError) throw dbError("load resolutions", resError);
-  const resolvedIds = new Set((resolutions ?? []).map((r) => String(r.chain_escrow_id)));
+  const writtenUp = new Set((resolutions ?? []).map((r) => String(r.chain_escrow_id)));
 
-  // Recorded rows the chain shows as resolved by a ruling we have no note for.
-  const { data: ruled } = await admin
-    .from("escrows")
-    .select(DISPUTE_COLUMNS)
-    .eq("contract_id", STELLAR.escrowContractId)
-    .not("resolution", "is", null);
-  const recordedIds = new Set<string>();
+  const rows: DisputeRow[] = [];
+  for (const r of recorded) {
+    const id = String(r.chain_escrow_id);
+    if (r.current_state === "disputed") rows.push(rowFromDb(r, byId.get(id) ?? null, "open"));
+    else if (!writtenUp.has(id)) rows.push(rowFromDb(r, byId.get(id) ?? null, "needs_note"));
+  }
+
+  for (const res of resolutions ?? []) {
+    const id = String(res.chain_escrow_id);
+    const db = recordedById.get(id);
+    const base: DisputeRow = db
+      ? rowFromDb(db, byId.get(id) ?? null, "refunded")
+      : {
+          chainEscrowId: id, status: "refunded", recorded: false, productName: `Escrow #${id}`, image: null,
+          buyerName: "Unknown buyer", sellerName: "Unknown seller", amountStroops: String(res.amount_stroops),
+          reason: null, openedAt: null, shippedAt: null, outcome: null, resolvedAt: null, adminName: null, note: null, txHash: null,
+        };
+    rows.push({
+      ...base,
+      status: res.outcome === "refund" ? "refunded" : "released",
+      outcome: res.outcome as DisputeOutcome,
+      resolvedAt: res.created_at as string,
+      adminName: one(res.admin as One<{ display_name: string | null }>)?.display_name ?? "Admin",
+      note: res.note as string,
+      txHash: res.tx_hash as string,
+    });
+  }
+
+  // Disputes on-chain that never became orders.
+  const recordedIds = new Set(recorded.map((r) => String(r.chain_escrow_id)));
   if (chainEscrows.length) {
-    const { data: allRecorded } = await admin
+    const { data } = await admin
       .from("escrows")
       .select("chain_escrow_id")
       .eq("contract_id", STELLAR.escrowContractId)
-      .in("chain_escrow_id", chainEscrows.map((e) => e.id.toString()));
-    for (const r of allRecorded ?? []) recordedIds.add(String(r.chain_escrow_id));
+      .in("chain_escrow_id", chainEscrows.filter((e) => e.status === "Disputed").map((e) => e.id.toString()).concat("0"));
+    for (const r of data ?? []) recordedIds.add(String(r.chain_escrow_id));
   }
-
-  const unrecordedRows = ((ruled ?? []) as unknown as DbDisputeRow[])
-    .filter((r) => !resolvedIds.has(String(r.chain_escrow_id)))
-    .map((r) => summaryFromRow(r, byId.get(String(r.chain_escrow_id)) ?? null));
-
-  // Disputes on-chain that never became orders.
   const chainOnly = chainEscrows.filter((e) => e.status === "Disputed" && !recordedIds.has(e.id.toString()));
   const names = await namesByAddress(admin, chainOnly.flatMap((e) => [e.buyer, e.seller]));
-  const chainOnlySummaries = await Promise.all(chainOnly.map((e) => summaryFromChain(admin, e, names)));
+  for (const s of await Promise.all(chainOnly.map((e) => summaryFromChain(admin, e, names)))) {
+    rows.push({
+      chainEscrowId: s.chainEscrowId, status: "open", recorded: false, productName: s.productName, image: null,
+      buyerName: s.buyerName, sellerName: s.sellerName, amountStroops: s.amountStroops, reason: s.reason,
+      openedAt: s.openedAt, shippedAt: null, outcome: null, resolvedAt: null, adminName: null, note: null, txHash: null,
+    });
+  }
 
-  return {
-    open: [...open, ...chainOnlySummaries],
-    unrecorded: unrecordedRows,
-    resolved: (resolutions ?? []).map((r) => ({
-      chainEscrowId: String(r.chain_escrow_id),
-      outcome: r.outcome as DisputeOutcome,
-      productName: (one(r.escrows as { asset_name: string } | { asset_name: string }[] | null)?.asset_name) ?? `Escrow #${r.chain_escrow_id}`,
-      amountStroops: String(r.amount_stroops),
-      adminName: one(r.admin as { display_name: string | null } | { display_name: string | null }[] | null)?.display_name ?? "Admin",
-      createdAt: r.created_at as string,
-      txHash: r.tx_hash as string,
-    })),
-    syncedAt: new Date().toISOString(),
-    chainError,
-  };
+  return { rows, chainError };
+}
+
+/** One page of the disputes queue, with tab counts and the summary strip, for a URL query. */
+export async function listDisputeQueue(query: DisputeQuery, opts: { sync?: boolean } = {}): Promise<DisputeQueue> {
+  const { rows, chainError } = await collectRows(!!opts.sync);
+  return { ...queryRows(rows, query), summary: summarize(rows), syncedAt: new Date(scanCache?.at ?? Date.now()).toISOString(), chainError };
 }
 
 // ---------------------------------------------------------------------------

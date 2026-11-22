@@ -1,6 +1,7 @@
 "use client";
 
-import type { DisputeDetail, DisputeList } from "./server";
+import type { DisputeDetail, DisputeQueue } from "./server";
+import { toSearchParams, type DisputeQuery } from "./disputeQuery";
 import type { DisputeOutcome } from "./disputes";
 
 /** Browser calls to the admin routes. The server re-checks the role and the chain on every one. */
@@ -23,7 +24,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export const fetchDisputes = () => request<DisputeList>("/api/admin/disputes");
+/** One page of the queue. `sync` rescans the contract instead of using the recent scan. */
+export function fetchDisputeQueue(query: DisputeQuery, sync = false) {
+  const params = toSearchParams(query);
+  if (sync) params.set("sync", "1");
+  return request<DisputeQueue>(`/api/admin/disputes?${params}`);
+}
 
 export const fetchDispute = (chainEscrowId: string) => request<DisputeDetail>(`/api/admin/disputes?id=${encodeURIComponent(chainEscrowId)}`);
 
