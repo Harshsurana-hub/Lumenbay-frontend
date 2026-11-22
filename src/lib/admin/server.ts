@@ -19,7 +19,6 @@ import {
   dbError,
   findEscrowRow,
   notify,
-
   readChain,
   type Admin,
   type EscrowRow,
@@ -129,8 +128,9 @@ export interface DisputeDetail {
   feeBps: number;
   currentLedger: number;
   requests: { requestId: string; reason: string; status: string; amountStroops: string; createdAt: string; evidenceHash: string | null }[];
+  /** The buyer's note; only ever stored after matching the on-chain fingerprint. */
   disputeNote: string | null;
-  /** Whether the stored note was checked against the on-chain fingerprint (always true when stored). */
+  /** While open and not concluded, it blocks resolve_dispute. */
   mediation: { expiresAt: number; concluded: boolean } | null;
   claimableAt: number | null;
   payout: PayoutState;
