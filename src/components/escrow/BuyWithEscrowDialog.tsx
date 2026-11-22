@@ -241,6 +241,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
             <p>You need the <strong className="text-ink">Freighter</strong> wallet extension to pay with escrow.</p>
             <a href="https://www.freighter.app/" target="_blank" rel="noreferrer" className={btn}>Get Freighter <ExternalLink className="h-3.5 w-3.5" /></a>
             <button onClick={() => wallet.refresh()} className="text-xs font-semibold text-accent">I&apos;ve installed it</button>
+            <GuideLink anchor="install-freighter">New to Freighter? Follow the setup guide</GuideLink>
           </div>
         );
       case "connect":
@@ -258,6 +259,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
           <div className={box}>
             <p>Your wallet is on the wrong network. Open it and switch the network to <strong className="text-ink">{isTestnet ? "Testnet" : "Mainnet"}</strong>, then check again.</p>
             <button onClick={() => wallet.refresh()} className={btn}>I&apos;ve switched</button>
+            <GuideLink anchor="switch-testnet">How to switch networks</GuideLink>
           </div>
         );
       case "no-seller-wallet":
@@ -274,6 +276,7 @@ export default function BuyWithEscrowDialog({ product, onClose }: { product: Pro
             {isTestnet && (
               <button onClick={() => wallet.fundWithFriendbot()} className={btn}>Get 10,000 free test XLM</button>
             )}
+            <GuideLink anchor="fees">Why you need a little extra</GuideLink>
           </div>
         );
       default:
@@ -298,5 +301,19 @@ function Step({ n, title, body, state, hash, busyText = "Approve in your walletâ
         )}
       </div>
     </li>
+  );
+}
+
+/** Opens the testnet guide in a new tab, so the checkout stays where it is. */
+function GuideLink({ anchor, children }: { anchor: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={`/help/testnet#${anchor}`}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center justify-center gap-1 text-xs font-semibold text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-accent"
+    >
+      {children} <ExternalLink className="h-3 w-3" aria-hidden />
+    </Link>
   );
 }

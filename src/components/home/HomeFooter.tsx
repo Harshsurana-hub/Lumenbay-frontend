@@ -19,6 +19,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
       ["Sell on Lumenbay", "/dashboard/selling"],
       ["Wallet", "/dashboard/wallet"],
       ["Help", "/help"],
+      ["Testnet guide", "/help/testnet"],
     ],
   },
   {
