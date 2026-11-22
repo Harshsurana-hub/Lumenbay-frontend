@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
-import { isConfirmedTx, readEscrow, type OnChainEscrow } from "@/lib/stellar/chain";
+import { isConfirmedTx, readClaimableAt, readEscrow, readRefundRequests, type OnChainEscrow } from "@/lib/stellar/chain";
+import { noteFingerprint } from "@/lib/admin/disputes";
 import { STELLAR } from "@/lib/stellar/config";
 import { parseOrderTag } from "@/lib/orderTag";
 import { decimalXlmToStroops, orderStatusFor, stepsToMatchChain, type DbEscrowState } from "./escrowState";
@@ -18,9 +19,9 @@ export class OrderApiError extends Error {
   }
 }
 
-type Admin = SupabaseClient;
+export type Admin = SupabaseClient;
 
-interface EscrowRow {
+export interface EscrowRow {
   id: string;
   order_id: string;
   buyer_id: string;
@@ -48,7 +49,7 @@ export function parseChainId(value: unknown): bigint {
   return BigInt(text);
 }
 
-async function readChain(id: bigint): Promise<OnChainEscrow> {
+export async function readChain(id: bigint): Promise<OnChainEscrow> {
   let escrow: OnChainEscrow | null;
   try {
     escrow = await readEscrow(id);
@@ -60,7 +61,7 @@ async function readChain(id: bigint): Promise<OnChainEscrow> {
   return escrow;
 }
 
-async function findEscrowRow(admin: Admin, id: bigint): Promise<EscrowRow | null> {
+export async function findEscrowRow(admin: Admin, id: bigint): Promise<EscrowRow | null> {
   const { data, error } = await admin
     .from("escrows")
     .select(ESCROW_COLUMNS)
@@ -71,17 +72,17 @@ async function findEscrowRow(admin: Admin, id: bigint): Promise<EscrowRow | null
   return data as EscrowRow | null;
 }
 
-function dbError(what: string, error: { message: string; code?: string }) {
+export function dbError(what: string, error: { message: string; code?: string }) {
   console.error(`[lumenbay:orders] ${what} failed`, error);
   return new OrderApiError(500, "Couldn't save to the database. Your money is safe on-chain; try again.");
 }
 
-async function notify(admin: Admin, userId: string, item: { type: "order" | "payment"; severity: "success" | "info" | "warning"; title: string; description: string; href: string }) {
+export async function notify(admin: Admin, userId: string, item: { type: "order" | "payment"; severity: "success" | "info" | "warning"; title: string; description: string; href: string }) {
   const { error } = await admin.from("activity_items").insert({ user_id: userId, ...item });
   if (error) console.error("[lumenbay:orders] notification failed", error); // never block the order on this
 }
 
-function stroopsToXlmString(stroops: bigint): string {
+export function stroopsToXlmString(stroops: bigint): string {
   const whole = stroops / BigInt(10_000_000);
   const fraction = (stroops % BigInt(10_000_000)).toString().padStart(7, "0");
   return `${whole}.${fraction}`;
@@ -238,20 +239,47 @@ export async function recordOrder(userId: string, id: bigint, hashes: { createTx
 // Sync: bring the database in line with the chain after release / dispute
 // ---------------------------------------------------------------------------
 
-export async function syncOrder(userId: string, id: bigint, hashes: { releaseTxHash?: string }) {
+export async function syncOrder(userId: string, id: bigint, hashes: { releaseTxHash?: string }, disputeNote?: string) {
   const admin = createAdminClient();
   const row = await findEscrowRow(admin, id);
   if (!row) throw new OrderApiError(404, "This order hasn't been recorded yet.");
   if (row.buyer_id !== userId && row.seller_id !== userId) throw new OrderApiError(403, "This order belongs to someone else.");
 
   const chain = await readChain(id);
+  const state = await applyChainState(admin, row, chain, hashes);
+
+  // The buyer's own words: stored only when they match the fingerprint on-chain.
+  if (state === "disputed" && disputeNote && row.buyer_id === userId) {
+    await storeDisputeNote(admin, row.id, id, disputeNote);
+  }
+
+  return { orderId: row.order_id, state };
+}
+
+/**
+ * Steps the escrow row to the chain's status, updates the order and tells
+ * the right people. Shared by the parties' sync and the admin tools.
+ */
+export async function applyChainState(admin: Admin, row: EscrowRow, chain: OnChainEscrow, hashes: { releaseTxHash?: string } = {}): Promise<DbEscrowState> {
+  const id = chain.id;
   const steps = stepsToMatchChain(row.current_state, chain.status);
+  const wasDisputed = row.current_state === "disputed" || steps.includes("disputed");
 
   let state = row.current_state;
   for (const next of steps) {
     const patch: Record<string, unknown> = { current_state: next };
-    if (next === "released" && (await isConfirmedTx(hashes.releaseTxHash, chain.buyer))) {
+    if (next === "released" && !wasDisputed && (await isConfirmedTx(hashes.releaseTxHash, chain.buyer))) {
       patch.release_tx_hash = hashes.releaseTxHash;
+    }
+    if (next === "disputed") {
+      patch.disputed_at = new Date().toISOString();
+      patch.dispute_reason = await latestDisputeReason(id);
+    }
+    if ((next === "released" || next === "refunded") && wasDisputed) {
+      // An admin ruling. The money moves later, after the appeal window.
+      patch.resolution = next === "refunded" ? "refund" : "release";
+      patch.resolved_at = new Date().toISOString();
+      patch.claimable_at_ledger = await readClaimableAt(id).catch(() => null);
     }
     const { error } = await admin.from("escrows").update(patch).eq("id", row.id).eq("current_state", state);
     if (error) throw dbError(`move escrow ${state} -> ${next}`, error);
@@ -265,17 +293,49 @@ export async function syncOrder(userId: string, id: bigint, hashes: { releaseTxH
     if (error) throw dbError("update order status", error);
 
     const href = `/dashboard/escrow/${id}`;
-    if (state === "released") {
+    if (state === "released" && wasDisputed) {
+      await Promise.all([
+        notify(admin, row.seller_id, { type: "payment", severity: "success", title: `Dispute resolved in your favour: ${row.asset_name}`, description: "The payment is released to you after a 24-hour appeal window.", href }),
+        notify(admin, row.buyer_id, { type: "order", severity: "info", title: `Dispute closed: ${row.asset_name}`, description: "The dispute was reviewed and the payment goes to the seller.", href }),
+      ]);
+    } else if (state === "released") {
       await notify(admin, row.seller_id, { type: "payment", severity: "success", title: `You've been paid: ${row.asset_name}`, description: "The buyer confirmed delivery and the escrow paid out to your wallet.", href });
     } else if (state === "disputed") {
       await notify(admin, row.seller_id, { type: "order", severity: "warning", title: `Dispute opened: ${row.asset_name}`, description: "The buyer reported a problem. The payment stays locked until it's resolved.", href });
     } else if (state === "refunded") {
-      await notify(admin, row.buyer_id, { type: "payment", severity: "success", title: `Refunded: ${row.asset_name}`, description: "The dispute was resolved and your XLM was returned.", href });
+      await Promise.all([
+        notify(admin, row.buyer_id, { type: "payment", severity: "success", title: `Refund approved: ${row.asset_name}`, description: "The dispute was resolved in your favour. Your XLM is returned after a 24-hour appeal window.", href }),
+        notify(admin, row.seller_id, { type: "order", severity: "warning", title: `Dispute closed: ${row.asset_name}`, description: "The dispute was reviewed and the buyer is refunded.", href }),
+      ]);
     }
     console.info("[lumenbay:orders] synced", { escrow: id.toString(), from: row.current_state, to: state });
   }
 
-  return { orderId: row.order_id, state };
+  return state;
+}
+
+async function latestDisputeReason(id: bigint): Promise<string | null> {
+  try {
+    const requests = await readRefundRequests(id);
+    return requests.at(-1)?.reason ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function storeDisputeNote(admin: Admin, rowId: string, id: bigint, note: string) {
+  const text = note.slice(0, 2000);
+  try {
+    const latest = (await readRefundRequests(id)).at(-1);
+    if (!latest?.evidenceHash || latest.evidenceHash !== (await noteFingerprint(note))) return;
+    const { error } = await admin
+      .from("escrows")
+      .update({ dispute_note: text, dispute_reason: latest.reason })
+      .eq("id", rowId);
+    if (error) console.error("[lumenbay:orders] store dispute note failed", error);
+  } catch (e) {
+    console.error("[lumenbay:orders] store dispute note failed", e); // the dispute itself is on-chain already
+  }
 }
 
 // ---------------------------------------------------------------------------

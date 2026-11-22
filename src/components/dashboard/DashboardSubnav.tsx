@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ModeSwitch from "@/components/layout/ModeSwitch";
 import { useAccountMode, type AccountMode } from "@/lib/accountMode";
+import { useIsAdmin } from "@/lib/admin/useIsAdmin";
 
 const TABS: Record<AccountMode, { label: string; href: string; exact?: boolean }[]> = {
   buying: [
@@ -22,9 +23,13 @@ const TABS: Record<AccountMode, { label: string; href: string; exact?: boolean }
   ],
 };
 
+const ADMIN_TAB = { label: "Admin · Disputes", href: "/dashboard/admin/disputes", exact: false };
+
 export default function DashboardSubnav({ title }: { title?: string }) {
   const pathname = usePathname();
   const mode = useAccountMode();
+  const isAdmin = useIsAdmin();
+  const tabs = isAdmin ? [...TABS[mode], ADMIN_TAB] : TABS[mode];
 
   return (
     <div className="flex h-12 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6">
@@ -33,7 +38,7 @@ export default function DashboardSubnav({ title }: { title?: string }) {
       </h1>
       <ModeSwitch className="shrink-0 lg:hidden" />
       <div className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-none">
-        {TABS[mode].map((tab) => {
+        {tabs.map((tab) => {
           const active = tab.exact ? pathname === tab.href : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
           return (
             <Link

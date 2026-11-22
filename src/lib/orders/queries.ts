@@ -24,6 +24,13 @@ export interface OrderSummary {
   shippingNote: string | null;
   fundTxHash: string | null;
   releaseTxHash: string | null;
+  /** Set when an admin settled a dispute on this order. */
+  resolution: "refund" | "release" | null;
+  resolvedAt: string | null;
+  resolveTxHash: string | null;
+  disputeReason: string | null;
+  paidOutAt: string | null;
+  payoutTxHash: string | null;
 }
 
 const ORDER_COLUMNS = `
@@ -31,7 +38,8 @@ const ORDER_COLUMNS = `
   buyer:profiles!orders_buyer_id_fkey ( display_name ),
   seller:profiles!orders_seller_id_fkey ( display_name ),
   products ( name, product_images ( url, position ) ),
-  escrows ( asset_name, chain_escrow_id, current_state, shipped_at, shipping_note, fund_tx_hash, release_tx_hash )
+  escrows ( asset_name, chain_escrow_id, current_state, shipped_at, shipping_note, fund_tx_hash, release_tx_hash,
+             resolution, resolved_at, resolve_tx_hash, dispute_reason, paid_out_at, payout_tx_hash )
 `;
 
 type One<T> = T | T[] | null;
@@ -56,6 +64,12 @@ interface OrderRow {
     shipping_note: string | null;
     fund_tx_hash: string | null;
     release_tx_hash: string | null;
+    resolution: "refund" | "release" | null;
+    resolved_at: string | null;
+    resolve_tx_hash: string | null;
+    dispute_reason: string | null;
+    paid_out_at: string | null;
+    payout_tx_hash: string | null;
   }>;
 }
 
@@ -81,6 +95,12 @@ function mapOrder(row: OrderRow, me: string): OrderSummary {
     shippingNote: escrow?.shipping_note ?? null,
     fundTxHash: escrow?.fund_tx_hash ?? null,
     releaseTxHash: escrow?.release_tx_hash ?? null,
+    resolution: escrow?.resolution ?? null,
+    resolvedAt: escrow?.resolved_at ?? null,
+    resolveTxHash: escrow?.resolve_tx_hash ?? null,
+    disputeReason: escrow?.dispute_reason ?? null,
+    paidOutAt: escrow?.paid_out_at ?? null,
+    payoutTxHash: escrow?.payout_tx_hash ?? null,
   };
 }
 
