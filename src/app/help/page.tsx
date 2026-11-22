@@ -42,14 +42,14 @@ const faqs: FAQItem[] = [
     category: "Escrow",
     question: "How does the escrow system work?",
     answer:
-      "When a buyer purchases an item, funds are locked in a Soroban smart contract. The seller ships the item and submits proof of delivery. Once the buyer confirms receipt, funds are automatically released to the seller. If there's a dispute, the escrow remains frozen pending resolution.",
+      "When a buyer purchases an item, funds are locked in a Soroban smart contract. The seller ships the item and marks it shipped, optionally with a tracking note. Once the buyer confirms it arrived, the contract pays the seller. If there's a dispute, the escrow remains frozen pending resolution.",
   },
   {
     id: "4",
     category: "Escrow",
     question: "What happens if I don't confirm receipt?",
     answer:
-      "If you don't confirm receipt within the specified timeframe, the funds will be automatically released to the seller. This protects sellers from buyers who receive items but don't confirm. Always review your orders promptly.",
+      "Your payment stays locked in escrow until you confirm. Nothing is released automatically, so confirm as soon as the item arrives: the seller only gets paid when you do. If something is wrong, open a dispute instead and a Lumenbay admin will review it.",
   },
   {
     id: "5",
