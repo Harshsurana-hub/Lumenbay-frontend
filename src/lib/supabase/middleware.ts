@@ -81,10 +81,13 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && matches(pathname, AUTH_ONLY_PREFIXES)) {
-    const home = request.nextUrl.clone();
-    home.pathname = SIGNED_IN_HOME;
-    home.search = '';
-    return NextResponse.redirect(home);
+    // Right after sign-in the login page refreshes before it navigates, so
+    // this redirect runs first: honour where the user was heading. Same-origin
+    // paths only, as on the login page, so it can't become an open redirect.
+    const returnUrl = request.nextUrl.searchParams.get('returnUrl') ?? '';
+    const safe = returnUrl.startsWith('/') && !returnUrl.startsWith('//') && !returnUrl.startsWith('/\\');
+    const target = new URL(safe ? returnUrl : SIGNED_IN_HOME, request.nextUrl.origin);
+    return NextResponse.redirect(target);
   }
 
   // The landing page is for visitors; a signed-in user goes straight to the
