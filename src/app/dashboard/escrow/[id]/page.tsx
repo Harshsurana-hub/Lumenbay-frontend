@@ -25,8 +25,12 @@ import { markOrderShipped, recordOrder, syncOrder } from "@/lib/orders/client";
 import { getOrderByChainId, type OrderSummary } from "@/lib/orders/queries";
 import { createClient } from "@/lib/supabase/client";
 import { STELLAR, explorerAccount, explorerContract, explorerTx } from "@/lib/stellar/config";
+import { recordPayout } from "@/lib/admin/client";
+import { countdownLabel, payoutState } from "@/lib/admin/disputes";
+import { readClaimableAt, readLatestLedger } from "@/lib/stellar/chain";
 import {
   EscrowError,
+  claimDisputedFunds,
   fundEscrow,
   getEscrow,
   openDispute,
@@ -47,6 +51,11 @@ const STATUS_COPY: Record<string, { label: string; body: string; tone: string }>
   Disputed: { label: "In dispute", body: "Funds stay locked while the dispute is reviewed. The outcome is either a refund or a release.", tone: "text-bad" },
   Refunded: { label: "Refunded", body: "The dispute was resolved in the buyer's favour.", tone: "text-ok" },
   Cancelled: { label: "Cancelled", body: "This escrow was cancelled before it was funded.", tone: "text-ink-muted" },
+};
+
+const RULED_COPY: Record<"refund" | "release", { label: string; body: string; tone: string }> = {
+  refund: { label: "Refunded after review", body: "Lumenbay reviewed the dispute and refunded the buyer in full.", tone: "text-ok" },
+  release: { label: "Released after review", body: "Lumenbay reviewed the dispute and released the payment to the seller.", tone: "text-ok" },
 };
 
 const REASONS: { value: RefundReason; label: string }[] = [
@@ -116,7 +125,9 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
   const walletIsBuyer = !!escrow && wallet.address === escrow.buyer;
   const shipped = order?.state === "in_transit" || !!order?.shippedAt;
   const amountXlm = escrow ? stroopsToXlm(escrow.amount) : 0;
-  const copy = escrow ? STATUS_COPY[escrow.status] ?? STATUS_COPY.Pending : null;
+  // A dispute an admin settled: the plain Released/Refunded copy would be wrong.
+  const ruled = order?.resolution ?? null;
+  const copy = escrow ? (ruled ? RULED_COPY[ruled] : STATUS_COPY[escrow.status] ?? STATUS_COPY.Pending) : null;
 
   const run = async (action: "fund" | "release" | "dispute") => {
     if (!escrow || !wallet.address) return;
@@ -142,7 +153,7 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
       } else {
         const { hash } = await openDispute({ buyer: wallet.address, escrowId: escrow.id, amountStroops: escrow.amount, reason, note });
         recordPaymentEvent({ ...base, step: "dispute_opened", txHash: hash });
-        if (order) await syncOrder(escrow.id).catch(() => {});
+        if (order) await syncOrder(escrow.id, undefined, note).catch(() => {});
         setDisputeOpen(false);
       }
       await load();
@@ -202,7 +213,7 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
       {escrow && (
         <RoleBanner
           role={isBuyer ? "buyer" : isSeller ? "seller" : wallet.address ? "outsider" : "unknown"}
-          status={escrow.status === "Funded" && shipped ? "Shipped" : escrow.status}
+          status={ruled ? (ruled === "refund" ? "RuledRefund" : "RuledRelease") : escrow.status === "Funded" && shipped ? "Shipped" : escrow.status}
           counterparty={order?.counterparty}
         />
       )}
@@ -212,8 +223,18 @@ export default function EscrowPage({ params }: { params: Promise<{ id: string }>
 
       {escrow && copy && (
         <>
-          <Track status={escrow.status} shipped={shipped} />
+          <Track status={ruled ? "Ruled" : escrow.status} shipped={shipped} />
           <p className="mt-4 text-sm text-ink-muted">{copy.body}</p>
+
+          {order && ruled && (
+            <DisputeOutcome
+              order={order}
+              escrowId={escrow.id}
+              amountXlm={amountXlm}
+              wallet={wallet.address}
+              onPaid={() => load()}
+            />
+          )}
 
           {order?.shippedAt && (
             <div className="mt-4 flex items-start gap-3 rounded-2xl border border-line bg-surface p-4">
@@ -346,6 +367,8 @@ const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
     Disputed: "You opened a dispute. Your money stays locked until it's resolved.",
     Refunded: "The dispute was resolved and your money was refunded.",
     Cancelled: "This order was cancelled before payment.",
+    RuledRefund: "We reviewed your dispute and refunded you in full.",
+    RuledRelease: "We reviewed your dispute and released the payment to the seller.",
   },
   seller: {
     Pending: "The buyer hasn't locked their payment yet. Don't ship until it shows as funded.",
@@ -355,8 +378,93 @@ const ROLE_COPY: Record<"buyer" | "seller", Record<string, string>> = {
     Disputed: "The buyer opened a dispute. The payment stays locked until it's resolved.",
     Refunded: "The dispute was resolved in the buyer's favour.",
     Cancelled: "This order was cancelled before payment.",
+    RuledRefund: "We reviewed the dispute and refunded the buyer.",
+    RuledRelease: "We reviewed the dispute and released the payment to you.",
   },
 };
+
+/**
+ * What happened after a dispute: who the admin ruled for, and where the money
+ * is. The contract holds it through a 24-hour appeal window; after that
+ * anyone can trigger the payout, so either party can do it from here.
+ */
+function DisputeOutcome({ order, escrowId, amountXlm, wallet, onPaid }: { order: OrderSummary; escrowId: bigint; amountXlm: number; wallet: string | null; onPaid: () => void }) {
+  const [chain, setChain] = useState<{ claimableAt: number | null; ledger: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([readClaimableAt(escrowId), readLatestLedger()])
+      .then(([claimableAt, ledger]) => !cancelled && setChain({ claimableAt, ledger }))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [escrowId, order.paidOutAt]);
+
+  const refund = order.resolution === "refund";
+  const recipient = refund ? "buyer" : "seller";
+  const mine = order.role === recipient;
+  const state = chain ? payoutState({ resolved: true, claimableAt: chain.claimableAt, currentLedger: chain.ledger }) : null;
+
+  const payOut = async () => {
+    if (!wallet) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { hash } = await claimDisputedFunds(wallet, escrowId);
+      await recordPayout(escrowId.toString(), hash).catch(() => {});
+      onPaid();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-ok-line bg-ok-bg/40 p-4">
+      <p className="flex items-center gap-2 text-sm font-black text-ink">
+        <Gavel className="h-4 w-4 text-ok" />
+        Dispute resolved: {refund ? `${amountXlm.toLocaleString()} XLM refunded to the buyer` : "payment released to the seller"}
+      </p>
+      <p className="text-xs text-ink-muted">
+        {order.resolvedAt && <>Decided {new Date(order.resolvedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}. </>}
+        {mine ? (refund ? "The money comes back to your wallet." : "The money goes to your payout wallet.") : refund ? "The buyer gets their money back." : "The seller receives the payment."}
+      </p>
+      {order.resolveTxHash && (
+        <a href={explorerTx(order.resolveTxHash)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 self-start font-mono text-xs text-accent">
+          Ruling {order.resolveTxHash.slice(0, 10)}… <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
+      {state?.kind === "paid" || order.paidOutAt ? (
+        <p className="flex items-center gap-2 text-xs font-semibold text-ok">
+          <CheckCircle2 className="h-3.5 w-3.5" /> Paid out
+          {order.payoutTxHash && (
+            <a href={explorerTx(order.payoutTxHash)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono text-accent">
+              {order.payoutTxHash.slice(0, 10)}… <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </p>
+      ) : state?.kind === "waiting" ? (
+        <p className="text-xs text-ink-muted">There&apos;s a 24-hour appeal window before the money moves. It can be paid out in {countdownLabel(state.secondsLeft)}.</p>
+      ) : state?.kind === "claimable" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-ink">The appeal window has passed. {mine ? "Collect your XLM now." : "Anyone can trigger the payout now."}</p>
+          {wallet ? (
+            <button onClick={payOut} disabled={busy} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-on-accent disabled:opacity-60">
+              {busy ? "Approve in your wallet…" : mine ? "Collect my XLM" : "Trigger payout"}
+            </button>
+          ) : (
+            <span className="text-xs text-ink-faint">Connect a wallet to send the payout.</span>
+          )}
+        </div>
+      ) : null}
+      {error && <p className="text-xs text-bad">{error}</p>}
+    </div>
+  );
+}
 
 /** Says plainly which side of this escrow the connected wallet is on. */
 function RoleBanner({ role, status, counterparty }: { role: "buyer" | "seller" | "outsider" | "unknown"; status: string; counterparty?: string }) {

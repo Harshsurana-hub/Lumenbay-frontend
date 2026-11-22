@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowRight,
+  Gavel,
   Heart,
   LayoutList,
   LogOut,
@@ -22,6 +23,7 @@ import ThemeToggle from "./ThemeToggle";
 import NavWalletButton from "@/components/wallet/NavWalletButton";
 import ModeSwitch from "./ModeSwitch";
 import { isStandalonePage } from "@/lib/standalonePages";
+import { useIsAdmin } from "@/lib/admin/useIsAdmin";
 
 const ACCOUNT_LINKS = [
   { href: "/dashboard/buying", label: "My Purchases", icon: Package },
@@ -31,10 +33,15 @@ const ACCOUNT_LINKS = [
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
+/** Shown only to admins. The admin pages check the role again on the server. */
+const ADMIN_LINK = { href: "/dashboard/admin/disputes", label: "Admin · Disputes", icon: Gavel };
+
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
+  const isAdmin = useIsAdmin();
+  const accountLinks = isAdmin ? [...ACCOUNT_LINKS, ADMIN_LINK] : ACCOUNT_LINKS;
   const [query, setQuery] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
   const accountButtonRef = useRef<HTMLButtonElement>(null);
@@ -254,7 +261,7 @@ export default function Navbar() {
                     <p className="truncate text-xs text-ink-muted">{user.email}</p>
                   </div>
                 </div>
-                {ACCOUNT_LINKS.map(({ href, label, icon: Icon }) => (
+                {accountLinks.map(({ href, label, icon: Icon }) => (
                   <Link
                     key={href}
                     href={href}

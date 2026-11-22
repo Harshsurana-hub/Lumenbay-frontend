@@ -21,6 +21,7 @@ export type RefundReason = "ProductNotReceived" | "ProductDefective" | "WrongPro
 
 /** Plain-English messages for the contract errors a buyer can actually hit. */
 const CONTRACT_ERRORS: Record<number, string> = {
+  1: "The connected wallet isn't the contract admin.",
   2: "Only the buyer can do that.",
   10: "That escrow doesn't exist on this network.",
   11: "The escrow isn't in the right state for that action.",
@@ -28,7 +29,11 @@ const CONTRACT_ERRORS: Record<number, string> = {
   31: "Escrow payments are paused right now. Try again later.",
   70: "An identical escrow already exists. Refresh and try again.",
   91: "This escrow is already funded.",
+  161: "The appeal window is still open, so the funds can't be paid out yet.",
   164: "That action is switched off at the moment.",
+  166: "A mediation window is open on this dispute. End it first, or wait for it to expire.",
+  167: "There's no mediation window on this dispute.",
+  168: "The mediation window has already closed.",
   169: "Payments in this token are paused right now.",
 };
 
@@ -147,6 +152,24 @@ export async function openDispute(params: { buyer: string; escrowId: bigint; amo
     reason: { tag: params.reason, values: undefined },
     evidence_hash: Buffer.from(evidence),
   });
+}
+
+/**
+ * Admin settles a dispute: 0 releases to the seller, 1 refunds the buyer.
+ * The contract checks the signer is its admin (or the escrow's arbiter).
+ */
+export function resolveDispute(admin: string, escrowId: bigint, resolution: 0 | 1) {
+  return invoke<void>(admin, "resolve_dispute", { escrow_id: escrowId, resolution });
+}
+
+/** Admin closes an open mediation window, which otherwise blocks resolve_dispute. */
+export function cancelMediation(admin: string, escrowId: bigint) {
+  return invoke<void>(admin, "cancel_mediation", { admin, escrow_id: escrowId });
+}
+
+/** Pays out a resolved dispute once its appeal window has passed. Any wallet may send it. */
+export function claimDisputedFunds(signer: string, escrowId: bigint) {
+  return invoke<void>(signer, "claim_disputed_funds", { escrow_id: escrowId });
 }
 
 /** Reads an escrow straight from the contract. Free: simulated, never submitted. */

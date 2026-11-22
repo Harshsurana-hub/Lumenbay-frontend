@@ -49,8 +49,9 @@ export async function recordOrder(chainEscrowId: bigint, hashes: { createTxHash?
   throw last;
 }
 
-export function syncOrder(chainEscrowId: bigint, releaseTxHash?: string): Promise<OrderResult> {
-  return post<OrderResult>("/api/escrows/sync", { chainEscrowId: chainEscrowId.toString(), releaseTxHash });
+/** `disputeNote` right after opening a dispute: kept only if it matches the on-chain fingerprint. */
+export function syncOrder(chainEscrowId: bigint, releaseTxHash?: string, disputeNote?: string): Promise<OrderResult> {
+  return post<OrderResult>("/api/escrows/sync", { chainEscrowId: chainEscrowId.toString(), releaseTxHash, disputeNote });
 }
 
 export function markOrderShipped(chainEscrowId: bigint, note: string): Promise<OrderResult> {
